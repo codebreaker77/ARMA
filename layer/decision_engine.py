@@ -9,6 +9,9 @@ import re
 from typing import Dict, Any, List, Optional, Tuple
 from micro_jev import MicroJevClient, Noul, Choice, Score
 from layer.evidence_db import EvidenceDB
+from layer.promotion_ladder import PromotionLadder
+from layer.gate_specs import StopGateSpec, ScopeGateSpec, RiskGateSpec, LoopDetectorSpec
+
 
 
 # Hard-coded destructive command patterns for instant deterministic veto
@@ -37,7 +40,8 @@ class DecisionGateResult:
         reason: str,
         confidence: float,
         probability: Optional[float] = None,
-        raw_decision: Optional[Dict[str, Any]] = None
+        raw_decision: Optional[Dict[str, Any]] = None,
+        decision_id: Optional[str] = None
     ):
         self.module = module
         self.allow = allow
@@ -48,9 +52,11 @@ class DecisionGateResult:
         self.confidence = confidence
         self.probability = probability
         self.raw_decision = raw_decision or {}
+        self.decision_id = decision_id
 
     def to_dict(self) -> Dict[str, Any]:
         return {
+            "decision_id": self.decision_id,
             "module": self.module,
             "allow": self.allow,
             "mode": self.mode,
@@ -61,6 +67,7 @@ class DecisionGateResult:
             "probability": self.probability,
             "raw_decision": self.raw_decision
         }
+
 
 
 class DecisionEngine:
@@ -78,21 +85,26 @@ class DecisionEngine:
     ):
         self.db = evidence_db or EvidenceDB()
         self.classifier = classifier_client or MicroJevClient()
-        # Per-module modes: 'shadow', 'advisory', 'confirm', 'enforce'
-        self.module_modes: Dict[str, str] = {
-            "stop_gate": default_mode,
-            "scope_gate": default_mode,
-            "risk_gate": default_mode,
-            "loop_detector": default_mode,
-        }
+        self.ladder = PromotionLadder(db=self.db)
+        for mod in ("stop_gate", "scope_gate", "risk_gate", "loop_detector"):
+            self.ladder.set_mode(mod, default_mode)
+
+    @property
+    def module_modes(self) -> Dict[str, str]:
+        return self.ladder._modes
 
     def set_module_mode(self, module: str, mode: str):
         """Set the promotion mode for a specific module."""
-        if mode not in ("shadow", "advisory", "confirm", "enforce"):
-            raise ValueError(f"Invalid mode: {mode}")
-        if module not in self.module_modes:
-            raise ValueError(f"Unknown module: {module}")
-        self.module_modes[module] = mode
+        self.ladder.set_mode(module, mode)
+
+    def get_module_mode(self, module: str) -> str:
+        """Get the current promotion mode for a module."""
+        return self.ladder.get_mode(module)
+
+    def check_promotion(self, module: str) -> Dict[str, Any]:
+        """Evaluate and apply automated promotion for a module."""
+        return self.ladder.check_and_promote(module)
+
 
     # -----------------------------------------------------------------------
     # 1. Stop Gate
@@ -117,7 +129,7 @@ class DecisionEngine:
             reason = f"Deterministic Block: Test suite failed with exit code {test_results['exit_code']}."
             action_taken = "pass" if mode == "shadow" else "block"
             counterfactual = "block"
-            self.db.record_decision(
+            dec_id = self.db.record_decision(
                 event_id=event_id,
                 module="stop_gate",
                 question_type="deterministic",
@@ -140,8 +152,10 @@ class DecisionEngine:
                 counterfactual_action=counterfactual,
                 reason=reason,
                 confidence=1.0,
-                probability=0.0
+                probability=0.0,
+                decision_id=dec_id
             )
+
 
         # 2. Classifier Evaluation on the Fuzzy Middle
         state = {
@@ -174,8 +188,13 @@ class DecisionEngine:
         prob = noul.probability
         conf = choice.confidence
 
-        is_complete = (prob >= 0.70 and choice.selected_option == "done")
+        tests_passed = bool(test_results and test_results.get("exit_code") == 0)
+        is_complete = (
+            (tests_passed and choice.selected_option in ("done", "needs_verification")) or
+            (prob >= 0.70 and choice.selected_option == "done")
+        )
         counterfactual = "pass" if is_complete else "block"
+
 
         if mode == "enforce":
             action = "pass" if is_complete else "block"
@@ -192,7 +211,7 @@ class DecisionEngine:
             else f"Incomplete task state: {choice.selected_option} (prob_satisfied={prob:.2f})."
         )
 
-        self.db.record_decision(
+        dec_id = self.db.record_decision(
             event_id=event_id,
             module="stop_gate",
             question_type="noul+choice",
@@ -215,11 +234,16 @@ class DecisionEngine:
             action_taken=action,
             counterfactual_action=counterfactual,
             reason=reason,
+            confidence=conf,
+            probability=prob,
+            decision_id=dec_id,
             raw_decision={
                 "noul": noul.model_dump() if hasattr(noul, "model_dump") else noul.dict(),
                 "choice": choice.model_dump() if hasattr(choice, "model_dump") else choice.dict()
             }
         )
+
+
 
 
     # -----------------------------------------------------------------------
@@ -244,7 +268,7 @@ class DecisionEngine:
                 reason = f"Deterministic Veto: Command matches destructive pattern: {pattern}"
                 action_taken = "pass" if mode == "shadow" else "block"
                 counterfactual = "block"
-                self.db.record_decision(
+                dec_id = self.db.record_decision(
                     event_id=event_id,
                     module="risk_gate",
                     question_type="deterministic_regex",
@@ -267,8 +291,10 @@ class DecisionEngine:
                     counterfactual_action=counterfactual,
                     reason=reason,
                     confidence=1.0,
-                    probability=0.0
+                    probability=0.0,
+                    decision_id=dec_id
                 )
+
 
         # 2. Classifier Judgment for Ambiguous Commands
         eval_res = self.classifier.system_one(
@@ -305,7 +331,7 @@ class DecisionEngine:
 
         reason = f"Command evaluated as {tier} (conf={conf:.2f})"
 
-        self.db.record_decision(
+        dec_id = self.db.record_decision(
             event_id=event_id,
             module="risk_gate",
             question_type="choice",
@@ -328,8 +354,12 @@ class DecisionEngine:
             action_taken=action,
             counterfactual_action=counterfactual,
             reason=reason,
+            confidence=conf,
+            probability=(1.0 if is_safe else 0.0),
+            decision_id=dec_id,
             raw_decision={"choice": tier_choice.model_dump() if hasattr(tier_choice, "model_dump") else tier_choice.dict()}
         )
+
 
 
     # -----------------------------------------------------------------------
@@ -360,7 +390,7 @@ class DecisionEngine:
                 if in_impact
                 else f"Scope Gate: File {target_file} is outside Fullerenes impact set ({len(impact_set)} files)."
             )
-            self.db.record_decision(
+            dec_id = self.db.record_decision(
                 event_id=event_id,
                 module="scope_gate",
                 question_type="impact_set_membership",
@@ -383,7 +413,8 @@ class DecisionEngine:
                 counterfactual_action=counterfactual,
                 reason=reason,
                 confidence=1.0,
-                probability=(1.0 if in_impact else 0.0)
+                probability=(1.0 if in_impact else 0.0),
+                decision_id=dec_id
             )
 
         # Classifier fallback check for semantic relevance when no graph impact set is available
@@ -405,7 +436,7 @@ class DecisionEngine:
         action = "pass" if (in_scope or mode == "shadow") else ("warn" if mode == "advisory" else "block")
         allow = True if mode in ("shadow", "advisory") else in_scope
 
-        self.db.record_decision(
+        dec_id = self.db.record_decision(
             event_id=event_id,
             module="scope_gate",
             question_type="noul",
@@ -431,8 +462,10 @@ class DecisionEngine:
             reason=f"Scope check: p_in_scope={prob:.2f}",
             confidence=conf,
             probability=prob,
+            decision_id=dec_id,
             raw_decision={"noul": raw_dump}
         )
+
 
 
     # -----------------------------------------------------------------------
@@ -488,7 +521,7 @@ class DecisionEngine:
         action = "pass" if (not is_looping or mode == "shadow") else ("warn" if mode == "advisory" else "intervene")
         allow = not (is_looping and mode == "enforce")
 
-        self.db.record_decision(
+        dec_id = self.db.record_decision(
             event_id=event_id,
             module="loop_detector",
             question_type="choice",
@@ -511,6 +544,11 @@ class DecisionEngine:
             action_taken=action,
             counterfactual_action=counterfactual,
             reason=f"Loop check: {choice.selected_option} (conf={conf:.2f})",
+            confidence=conf,
+            probability=(0.0 if is_looping else 1.0),
+            decision_id=dec_id,
             raw_decision={"choice": choice.model_dump() if hasattr(choice, "model_dump") else choice.dict()}
         )
+
+
 

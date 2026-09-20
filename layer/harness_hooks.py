@@ -95,8 +95,9 @@ class ArmaHooks:
 
         # 1. Evaluate Loop Detector
         loop_res = self.engine.evaluate_loop(session_id, event_id, recent)
-        if not loop_res.allow:
+        if loop_res.counterfactual_action == "intervene" or not loop_res.allow:
             return loop_res
+
 
         # 2. Evaluate Risk Gate for bash / shell commands
         if tool_name in ("bash", "run_command", "execute_command", "terminal"):
