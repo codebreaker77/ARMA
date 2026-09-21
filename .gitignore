@@ -38,5 +38,6 @@ ENV/
 *.swp
 *.swo
 
-# Logs
+# Logs and Data Exports
 *.log
+data/

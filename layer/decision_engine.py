@@ -11,6 +11,7 @@ from micro_jev import MicroJevClient, Noul, Choice, Score
 from layer.evidence_db import EvidenceDB
 from layer.promotion_ladder import PromotionLadder
 from layer.gate_specs import StopGateSpec, ScopeGateSpec, RiskGateSpec, LoopDetectorSpec
+from layer.calibrator import CalibrationStore, TemperatureScaler
 
 
 
@@ -81,13 +82,26 @@ class DecisionEngine:
         self,
         evidence_db: Optional[EvidenceDB] = None,
         classifier_client: Optional[MicroJevClient] = None,
-        default_mode: str = "shadow"
+        default_mode: str = "shadow",
+        calibration_path: Optional[str] = None
     ):
         self.db = evidence_db or EvidenceDB()
         self.classifier = classifier_client or MicroJevClient()
         self.ladder = PromotionLadder(db=self.db)
+        self.calibration_path = calibration_path
+        self.calibration = CalibrationStore.load(self.calibration_path)
         for mod in ("stop_gate", "scope_gate", "risk_gate", "loop_detector"):
             self.ladder.set_mode(mod, default_mode)
+
+    def reload_calibration(self, calibration_path: Optional[str] = None):
+        """Reload temperature scaling and threshold parameters from disk."""
+        if calibration_path:
+            self.calibration_path = calibration_path
+        self.calibration = CalibrationStore.load(self.calibration_path)
+
+    def get_module_calibration(self, module: str) -> Dict[str, Any]:
+        """Fetch active temperature and threshold for a module."""
+        return self.calibration.get(module, {"temperature": 1.0, "threshold": 0.5})
 
     @property
     def module_modes(self) -> Dict[str, str]:
@@ -185,13 +199,19 @@ class DecisionEngine:
 
         noul = eval_res.answers["requirements_satisfied"]
         choice = eval_res.answers["completion_state"]
-        prob = noul.probability
+        raw_prob = noul.probability
         conf = choice.confidence
+
+        stop_cal = self.get_module_calibration("stop_gate")
+        temp = stop_cal.get("temperature", 1.0)
+        bias = stop_cal.get("bias", 0.0)
+        tau = stop_cal.get("threshold", 0.70)
+        prob = TemperatureScaler.scale_probability(raw_prob, temp, bias)
 
         tests_passed = bool(test_results and test_results.get("exit_code") == 0)
         is_complete = (
             (tests_passed and choice.selected_option in ("done", "needs_verification")) or
-            (prob >= 0.70 and choice.selected_option == "done")
+            (prob >= tau and choice.selected_option == "done")
         )
         counterfactual = "pass" if is_complete else "block"
 
@@ -428,9 +448,16 @@ class DecisionEngine:
         )
 
         noul = eval_res.answers["is_file_in_scope"]
-        prob = noul.probability
+        raw_prob = noul.probability
         conf = noul.confidence
-        in_scope = prob >= 0.50
+
+        scope_cal = self.get_module_calibration("scope_gate")
+        temp = scope_cal.get("temperature", 1.0)
+        bias = scope_cal.get("bias", 0.0)
+        tau = scope_cal.get("threshold", 0.50)
+        prob = TemperatureScaler.scale_probability(raw_prob, temp, bias)
+
+        in_scope = prob >= tau
         counterfactual = "pass" if in_scope else "block"
 
         action = "pass" if (in_scope or mode == "shadow") else ("warn" if mode == "advisory" else "block")

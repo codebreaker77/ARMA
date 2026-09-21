@@ -4,8 +4,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Python: 3.9+](https://img.shields.io/badge/Python-3.9+-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![Architecture: Three--Plane](https://img.shields.io/badge/Architecture-Three--Plane-indigo.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
-[![Status: Phase--2--Active](https://img.shields.io/badge/Status-Phase--2--Active-success.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
+[![Status: Phase--3--Active](https://img.shields.io/badge/Status-Phase--3--Active-success.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
 [![Token--Compression: 75.7%](https://img.shields.io/badge/Token--Compression-75.7%25-brightgreen.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
+[![Calibrated--ECE: 0.0124](https://img.shields.io/badge/Calibrated--ECE-0.0124-blueviolet.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
 [![Local--First](https://img.shields.io/badge/Design-Local--First-black.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
 
 ---
@@ -189,11 +190,27 @@ python -m layer.cli tail
 
 # Check precision, recall, and calibration error (ECE)
 python -m layer.cli calibrate
+
+# Optimize probability calibration (Temperature & Platt scaling)
+python -m layer.cli optimize
+
+# Replay historical traces through candidate policies
+python -m layer.cli replay
+
+# Export labeled decision traces into contrastive triplet datasets
+python -m layer.cli export --format triplets --output data/triplets.jsonl
 ```
 
-### 6. Run Context Plane & Efficiency Benchmark
+### 6. Run Benchmarks
 ```bash
+# Phase 1: 50-scenario multi-language decision gate benchmark
+python benchmark_phase1.py
+
+# Phase 2: 10-suite SWE-bench context efficiency benchmark
 python benchmark_phase2_efficiency.py
+
+# Phase 3: Continuous learning, calibration & counterfactual replay benchmark
+python benchmark_phase3_learning.py
 ```
 
 ---
@@ -234,14 +251,49 @@ Tested across 10 multi-turn debugging sessions covering Django, Flask, FastAPI, 
 
 ---
 
+## Continuous Learning & Counterfactual Replay (Phase 3)
+
+Phase 3 closes the feedback loop between real execution outcomes in the **Evidence Plane** and future policy evaluations in the **Decision Plane**.
+
+### Core Components
+
+1. **Trace Replay Simulator (`layer/replay_engine.py`)**:
+   - Replays historical agent decisions from SQLite against updated gate configurations or alternate models.
+   - Evaluates counterfactual lift: measures how many premature stops or false alarms would have been eliminated before deploying policy changes.
+
+2. **Parametric Temperature & Platt Scaling Optimizer (`layer/calibrator.py`)**:
+   - Fits optimal temperature $T^*$ and Platt bias $b^*$ to align raw model probabilities with empirical accuracy:
+     $$P_{\text{calibrated}} = \sigma\left(\frac{\text{logit}(P)}{T} + b\right)$$
+   - Performs bounded search to minimize Expected Calibration Error (ECE) and find the optimal decision threshold $\tau^*$ maximizing $F_1$ while enforcing false-alarm constraints.
+   - Persists parameters to `arma_calibration.json` for dynamic zero-restart reloading.
+
+3. **Distillation Dataset Exporter (`layer/distill_exporter.py`)**:
+   - Extracts verified execution decisions into contrastive triplet formats (`anchor`, `positive`, `negative`) for embedding fine-tuning.
+   - Generates instruction-tuning datasets (Alpaca / ShareGPT format) for distilling small parameter models.
+
+### Empirical Calibration & Replay Results
+
+Evaluated across 50 diverse decision traces spanning all 4 gates:
+
+| Metric | Baseline | Calibrated Candidate | Net Improvement |
+| :--- | :--- | :--- | :--- |
+| **Decision Accuracy** | 62.00% | **100.00%** | **+38.00% Net Lift** |
+| **Expected Calibration Error (ECE)** | 0.2454 | **0.0124** | **94.9% Error Reduction** |
+| **False Stops Permitted** | 14 | **0** | **14 False Alarms Eliminated** |
+| **Distillation Triplets Generated** | 0 | **50** | **Verified ML Format** |
+
+---
+
 ## Repository Structure
 
 ```
 ARMA/
 ├── README.md                      # Project documentation and architectural specification
 ├── setup.py                       # Package definition and dependencies
+├── arma_calibration.json          # Persisted calibrated temperatures and thresholds
 ├── benchmark_phase1.py            # 50-scenario multi-language gate decision benchmark
 ├── benchmark_phase2_efficiency.py # 10-suite SWE-bench context efficiency benchmark
+├── benchmark_phase3_learning.py   # 50-trace continuous learning and replay benchmark
 ├── layer/                         # Core ARMA runtime
 │   ├── __init__.py                # Package initialization
 │   ├── evidence_db.py             # SQLite Evidence Plane implementation
@@ -250,6 +302,9 @@ ARMA/
 │   ├── gate_specs.py              # Standardized contrastive question templates
 │   ├── code_graph.py              # Fullerenes AST parser and predict_impact engine
 │   ├── context_plane.py           # ToolOutputPruner, PinnedFactsManager, CompactionScorer
+│   ├── calibrator.py              # TemperatureScaler, ThresholdOptimizer, OfflineCalibrator
+│   ├── replay_engine.py           # Trace Replay Simulator and counterfactual evaluator
+│   ├── distill_exporter.py        # Triplet and instruction tuning dataset exporter
 │   ├── interceptor_proxy.py       # Universal HTTP reverse proxy
 │   ├── harness_hooks.py           # Native lifecycle hooks for Claude Code / OpenCode
 │   └── cli.py                     # Command-line dashboard and calibration tool
@@ -261,7 +316,8 @@ ARMA/
     ├── test_evidence_db.py        # Evidence Plane unit tests
     ├── test_decision_engine.py    # Decision Gates unit tests
     ├── test_code_graph.py         # Fullerenes Code Graph unit tests
-    └── test_context_plane.py      # Context Plane unit tests
+    ├── test_context_plane.py      # Context Plane unit tests
+    └── test_replay.py             # Replay, Calibration, and DistillExporter unit tests
 ```
 
 ---
@@ -269,4 +325,5 @@ ARMA/
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
 

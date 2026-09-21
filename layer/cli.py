@@ -95,6 +95,98 @@ def cmd_calibrate(args):
     print("=" * 65)
 
 
+def cmd_replay(args):
+    """Replay historical traces through candidate calibration policies."""
+    from layer.replay_engine import ReplayEngine
+    from layer.calibrator import CalibrationStore
+
+    engine = ReplayEngine()
+    config = CalibrationStore.load()
+
+    if args.session:
+        summary = engine.replay_session(session_id=args.session, candidate_config=config)
+    else:
+        summary = engine.replay_all(module=args.module, candidate_config=config)
+
+    print("=" * 75)
+    print("ARMA Counterfactual Trace Replay Summary")
+    print("=" * 75)
+    print(f"Total Decisions Replayed      : {summary.total_replayed}")
+    print(f"Original Baseline Accuracy    : {summary.original_accuracy * 100:.2f}%")
+    print(f"Candidate Calibrated Accuracy : {summary.candidate_accuracy * 100:.2f}%")
+    print(f"Counterfactual Net Lift       : {summary.counterfactual_lift * 100:+.2f}%")
+    print(f"Baseline False Stops          : {summary.original_false_stops}")
+    print(f"Candidate False Stops         : {summary.candidate_false_stops}")
+    print(f"Net False Alarms Eliminated   : {summary.net_false_alarms_eliminated}")
+    print("-" * 75)
+    if summary.diffs:
+        print(f"Decision Flips ({len(summary.diffs)} total):")
+        for d in summary.diffs[:5]:
+            print(f"  [{d.module}] Turn {d.turn}: {d.original_action} -> {d.candidate_action} (Truth: {d.ground_truth})")
+    print("=" * 75)
+
+
+def cmd_optimize(args):
+    """Run temperature scaling and decision threshold optimization on EvidenceDB."""
+    from layer.calibrator import OfflineCalibrator
+
+    calibrator = OfflineCalibrator()
+    if args.module:
+        res = {args.module: calibrator.optimize_module(args.module)}
+    else:
+        res = calibrator.optimize_all_modules(save=True)
+
+    print("=" * 80)
+    print("ARMA Continuous Probability Calibration & Threshold Optimization")
+    print("=" * 80)
+
+    headers = ["Module", "Samples", "Opt Temp", "Opt Tau", "Init ECE", "Cal ECE", "F1 Score", "Status"]
+    rows = []
+    for mod, r in res.items():
+        rows.append([
+            mod,
+            str(r.get("samples", 0)),
+            f"{r.get('temperature', 1.0):.2f}",
+            f"{r.get('threshold', 0.5):.2f}",
+            f"{r.get('initial_ece', 0.0):.4f}",
+            f"{r.get('calibrated_ece', 0.0):.4f}",
+            f"{r.get('f1_score', 0.0):.4f}",
+            r.get("status", "UNKNOWN")
+        ])
+    print(format_table(headers, rows))
+    print("=" * 80)
+    print("Calibration parameters saved to arma_calibration.json")
+
+
+def cmd_export(args):
+    """Export labeled Evidence Plane traces into ML distillation datasets."""
+    from layer.distill_exporter import DistillExporter
+
+    exporter = DistillExporter()
+    output_path = args.output
+
+    if args.format == "triplets":
+        count = exporter.export_contrastive_triplets(
+            output_path=output_path,
+            module=args.module,
+            only_disagreements=args.disagreements_only
+        )
+    else:
+        count = exporter.export_instruction_tuning(
+            output_path=output_path,
+            format_type=args.format,
+            module=args.module
+        )
+
+    print("=" * 70)
+    print("ARMA Distillation Dataset Export")
+    print("=" * 70)
+    print(f"Export Format      : {args.format}")
+    print(f"Records Exported   : {count}")
+    print(f"Destination File   : {output_path}")
+    print("=" * 70)
+
+
 def main():
     parser = argparse.ArgumentParser(prog="arma", description="ARMA Layer CLI")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
@@ -112,6 +204,25 @@ def main():
     p_cal = subparsers.add_parser("calibrate", help="Calculate precision, recall, and ECE")
     p_cal.add_argument("-m", "--module", type=str, default=None, help="Specific module to calibrate")
     p_cal.set_defaults(func=cmd_calibrate)
+
+    # replay
+    p_replay = subparsers.add_parser("replay", help="Replay traces through candidate policies")
+    p_replay.add_argument("-s", "--session", type=str, default=None, help="Specific session ID to replay")
+    p_replay.add_argument("-m", "--module", type=str, default=None, help="Filter by specific module")
+    p_replay.set_defaults(func=cmd_replay)
+
+    # optimize
+    p_opt = subparsers.add_parser("optimize", help="Fit temperature scaling and decision thresholds")
+    p_opt.add_argument("-m", "--module", type=str, default=None, help="Specific module to optimize")
+    p_opt.set_defaults(func=cmd_optimize)
+
+    # export
+    p_exp = subparsers.add_parser("export", help="Export labeled traces into training datasets")
+    p_exp.add_argument("-f", "--format", choices=["triplets", "alpaca", "sharegpt"], default="triplets", help="Output format")
+    p_exp.add_argument("-o", "--output", type=str, default="data/arma_distill.jsonl", help="Target output file path")
+    p_exp.add_argument("-m", "--module", type=str, default=None, help="Filter by specific module")
+    p_exp.add_argument("--disagreements-only", action="store_true", help="Only export high-leverage disagreement samples")
+    p_exp.set_defaults(func=cmd_export)
 
     args = parser.parse_args()
     if not hasattr(args, "func"):

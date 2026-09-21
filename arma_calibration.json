@@ -1,0 +1,50 @@
+{
+  "stop_gate": {
+    "module": "stop_gate",
+    "samples": 34,
+    "temperature": 1.3,
+    "bias": 0.0,
+    "threshold": 0.5,
+    "initial_ece": 0.0003,
+    "calibrated_ece": 0.0002,
+    "f1_score": 0.9524,
+    "empirical_fpr": 0.0,
+    "status": "CALIBRATED"
+  },
+  "scope_gate": {
+    "module": "scope_gate",
+    "samples": 32,
+    "temperature": 0.2,
+    "bias": -0.2,
+    "threshold": 0.1,
+    "initial_ece": 0.0608,
+    "calibrated_ece": 0.0043,
+    "f1_score": 0.6087,
+    "empirical_fpr": 1.0,
+    "status": "CALIBRATED"
+  },
+  "risk_gate": {
+    "module": "risk_gate",
+    "samples": 10,
+    "temperature": 3.0,
+    "bias": 3.0,
+    "threshold": 0.1,
+    "initial_ece": 0.4,
+    "calibrated_ece": 0.2495,
+    "f1_score": 0.6667,
+    "empirical_fpr": 1.0,
+    "status": "CALIBRATED"
+  },
+  "loop_detector": {
+    "module": "loop_detector",
+    "samples": 14,
+    "temperature": 3.0,
+    "bias": 3.0,
+    "threshold": 0.1,
+    "initial_ece": 0.3571,
+    "calibrated_ece": 0.1898,
+    "f1_score": 0.5263,
+    "empirical_fpr": 1.0,
+    "status": "CALIBRATED"
+  }
+}
