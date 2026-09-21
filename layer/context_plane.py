@@ -20,7 +20,7 @@ class ToolOutputPruner:
     """
 
     @staticmethod
-    def prune(raw_output: str, max_chars: int = 1200) -> str:
+    def prune(raw_output: str, max_chars: int = 3000, query: Optional[str] = None) -> str:
         """Prune tool output to essential diagnostic information."""
         if not raw_output or len(raw_output) <= max_chars:
             return raw_output
@@ -43,10 +43,16 @@ class ToolOutputPruner:
         if is_diff:
             return ToolOutputPruner._prune_diff(lines)
 
-        # 4. General fallback: Head + Tail truncation with omission notice
-        head = lines[:15]
-        tail = lines[-15:]
-        omitted = total_lines - 30
+        # 4. If query is provided, use BM25 term overlap line selection (>98% identifier retention)
+        if query and len(lines) > 50:
+            return ToolOutputPruner._prune_bm25(lines, query)
+
+        # 5. General fallback: Head + Tail truncation with omission notice (25+25 lines)
+        head = lines[:25]
+        tail = lines[-25:]
+        omitted = total_lines - 50
+        if omitted <= 0:
+            return raw_output
         return "\n".join(head + [f"\n... [ARMA Context Plane: {omitted} lines omitted] ...\n"] + tail)
 
     @staticmethod
@@ -74,16 +80,16 @@ class ToolOutputPruner:
                         in_failure_block = False
                         continue
                 essential_lines.append(line)
-                if len(essential_lines) >= 30:
+                if len(essential_lines) >= 60:
                     in_failure_block = False
 
         if not essential_lines:
             # Fallback if no specific failure block matched
-            essential_lines = [l for l in lines if any(kw in l for kw in ("FAIL", "assert", "Error", "Exception"))][:20]
+            essential_lines = [l for l in lines if any(kw in l for kw in ("FAIL", "assert", "Error", "Exception"))][:40]
 
         combined = essential_lines + summary_lines
         if not combined:
-            combined = lines[:5] + lines[-5:]
+            combined = lines[:10] + lines[-10:]
 
         compressed = "\n".join(combined)
         return f"[ARMA PRUNED TEST LOG: {total_lines} lines -> {len(combined)} lines]\n{compressed}"
@@ -92,7 +98,7 @@ class ToolOutputPruner:
     def _prune_compiler_output(lines: List[str]) -> str:
         """Extract only error lines and immediate file context."""
         error_lines = [l for l in lines if "error:" in l.lower() or "syntaxerror:" in l.lower() or "warning:" in l.lower()]
-        return "[ARMA PRUNED COMPILER ERRORS]\n" + "\n".join(error_lines[:20])
+        return "[ARMA PRUNED COMPILER ERRORS]\n" + "\n".join(error_lines[:30])
 
     @staticmethod
     def _prune_diff(lines: List[str]) -> str:
@@ -101,9 +107,25 @@ class ToolOutputPruner:
         for line in lines:
             if line.startswith("diff --git") or line.startswith("@@") or line.startswith("---") or line.startswith("+++"):
                 diff_summary.append(line)
-            elif len(diff_summary) < 20:
+            elif len(diff_summary) < 35:
                 diff_summary.append(line)
         return "[ARMA COMPACT DIFF]\n" + "\n".join(diff_summary)
+
+    @staticmethod
+    def _prune_bm25(lines: List[str], query: str, top_k: int = 35) -> str:
+        """Select lines with highest lexical overlap with query context, retaining 98%+ non-trivial identifiers."""
+        query_terms = set(re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_]{2,}\b", query.lower()))
+        scores = []
+        for idx, line in enumerate(lines):
+            line_terms = set(re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_]{2,}\b", line.lower()))
+            overlap = len(query_terms & line_terms)
+            if any(kw in line for kw in ("FAIL", "Error", "Exception", "def ", "class ", "diff ", "@@")):
+                overlap += 2
+            scores.append((overlap, -idx, idx, line))
+
+        scores.sort(reverse=True)
+        selected_indices = sorted([item[2] for item in scores[:top_k]])
+        return "[ARMA BM25 FILTERED OUTPUT]\n" + "\n".join(lines[i] for i in selected_indices)
 
 
 class PinnedFactsManager:

@@ -1,14 +1,11 @@
 # ARMA: Autonomous Reliability & Metacognitive Architecture
-### The Decision, Context, and Evidence Layer for Coding Agents
+### The Control Plane, Context Optimizer, and Evidence Layer for Coding Agents
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Python: 3.9+](https://img.shields.io/badge/Python-3.9+-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://python.org)
-[![Architecture: Three--Plane](https://img.shields.io/badge/Architecture-Three--Plane-indigo.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
-[![Status: Phase--5--Complete](https://img.shields.io/badge/Status-Phase--5--Complete-success.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
-[![Self--Healing: LoopBreaker--Active](https://img.shields.io/badge/Self--Healing-LoopBreaker--Active-blueviolet.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
-[![Rollback--Fidelity: 100%](https://img.shields.io/badge/Rollback--Fidelity-100%25-brightgreen.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
-[![Token--Compression: 75.7%](https://img.shields.io/badge/Token--Compression-75.7%25-brightgreen.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
-[![Calibrated--ECE: 0.0124](https://img.shields.io/badge/Calibrated--ECE-0.0124-blueviolet.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
+[![Risk--Gate: Deterministic--Enforced](https://img.shields.io/badge/Risk--Gate-Deterministic--Enforced-brightgreen.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
+[![Stop--Gate: Experimental--Advisory](https://img.shields.io/badge/Stop--Gate-Experimental--Advisory-yellow.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
+[![Promotion--Ladder: Active](https://img.shields.io/badge/Promotion--Ladder-Active-blueviolet.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
 [![MCP: Native--JSON--RPC](https://img.shields.io/badge/MCP-Native--JSON--RPC-orange.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
 [![Local--First](https://img.shields.io/badge/Design-Local--First-black.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
 
@@ -16,15 +13,18 @@
 
 ## Executive Summary
 
-Autonomous coding agents (such as Claude Code, OpenCode, Aider, and SWE-agent) fail predominantly at a small set of recurring metacognitive decisions:
-1. When to stop (premature exit vs. infinite looping).
-2. What remains in scope (accidental refactoring outside the blast radius).
-3. What commands are destructive (unrecoverable shell operations).
-4. What information is worth preserving in context (preventing context degradation).
+Autonomous coding agents (such as Claude Code, OpenCode, Aider, and SWE-agent) fail predominantly at a small set of recurring operational and metacognitive decisions:
+1. **Destructive Operations**: Shell commands that wipe environments, force-push branches, or delete database tables.
+2. **Context Bloat & Token Inefficiency**: Multi-thousand line tool outputs that inflate prompt costs and degrade agent reasoning.
+3. **Out-of-Scope Blast Radius**: Modifying unrelated infrastructure or configuration files outside the target task bounds.
+4. **Premature Termination**: Stopping execution before verifying changes or when terminal assertions remain unresolved.
 
-Today, these decisions are implicit, unmeasured, and uncalibrated. ARMA makes these decisions explicit, measures them against real-world execution outcomes, and continuously improves them using empirical data.
+ARMA operates as a local-first control plane between any coding agent harness and the target codebase.
 
-ARMA operates as a universal, local-first control plane between any coding agent harness and the target codebase.
+### Core Design Principles & Empirical Transparency:
+- **Deterministic Vetoes Over Machine Learning**: Hard deny rules (Risk Gate) retain instant veto power (<1 ms). Statistical heads only provide advisory signals.
+- **Strict Promotion Governance**: Invariants prevent unverified heuristics from blocking developer workflows. A gate remains in `Shadow` or `Advisory` mode until it mathematically demonstrates $\ge 96\%$ precision and $\le 4\%$ false-block rates.
+- **Empirically Validated Limits**: On 1,000 public benchmark trajectories (OpenHands / SWE-rebench across 553 repositories), naive test-exit rules exhibit a **42.1% False-Block Rate** and near-chance accuracy (56.2%). Consequently, Stop Gate is maintained in **Advisory / Experimental** mode, avoiding unrewarded token loops.
 
 ---
 
@@ -42,14 +42,14 @@ ARMA operates as a universal, local-first control plane between any coding agent
 |  1. CONTEXT PLANE                                                       |
 |     - Fullerenes Code Graph foundation (predict_impact integration)     |
 |     - Wide retrieval with low-latency relevance filtering              |
-|     - Tool output pruner (collapsing multi-thousand line logs)          |
+|     - Diagnostic tool output pruner (action-preserving compaction)      |
 |     - Pinned facts injector (countering middle-of-context burial)       |
 |                                                                         |
-|  2. DECISION PLANE (Hybrid Deterministic + Calibrated Middle)           |
-|     - Stop Gate     : Blocks premature completion without verification  |
-|     - Scope Gate    : Constrains edits to verified dependency bounds    |
-|     - Risk Gate     : Hard deny policies + calibrated risk scoring      |
-|     - Loop Detector : Detects thrashing and triggers git rollbacks      |
+|  2. DECISION PLANE (Deterministic Invariants + Advisory Middle)         |
+|     - Risk Gate     : Hard deny policies (<1ms instant veto) [Enforce]  |
+|     - Scope Gate    : AST CodeGraph blast radius + probe [Advisory]     |
+|     - Stop Gate     : Pre-submit diagnostic check [Experimental]        |
+|     - Loop Detector : Thrashing detection & surgical rollback [Advisory]|
 |                                                                         |
 |     Promotion Ladder: Shadow -> Advisory -> Confirm -> Enforce          |
 |                                                                         |
@@ -67,16 +67,15 @@ ARMA operates as a universal, local-first control plane between any coding agent
 
 ---
 
-## Core Modules & Decision Invariants
+## Core Modules & Status
 
-ARMA enforces a strict architectural invariant: **Deterministic code computes anything exact; hard deny rules retain veto power; the classifier only judges the fuzzy middle.**
-
-| Module | Deterministic Inputs | Classifier Question Primitives | Enforced Action |
-| :--- | :--- | :--- | :--- |
-| **Stop Gate** | Task checklist, exit codes, git diffstat, unhandled exceptions | `Noul` (requirement met probability), `Choice` (done / needs verification / incomplete / blocked) | Blocks premature agent exit with a concrete diagnostic rationale |
-| **Scope Gate** | Task description, proposed file edit, Fullerenes impact graph closure | `Noul` (edit justified by task), `Score` (blast radius divergence 1-5) | Warns, prompts for confirmation, or blocks edits outside blast radius |
-| **Risk Gate** | Shell command, working directory, git state, sandbox flags | `Choice` (read_only, recoverable, destructive, exfiltrating) | Executes instant deny on hard invariants; prompts confirmation on high-risk actions |
-| **Loop Detector** | Rolling window of last N tool calls, diff hashes, and results | `Choice` (progressing, thrashing, blocked) | Triggers automated git stash reset and injects a strategic constraint |
+| Module | Deterministic Inputs | Evaluation Method | Status | Role |
+| :--- | :--- | :--- | :--- | :--- |
+| **Risk Gate** | Shell command, working directory, git state | Exact invariant regex & path validation | **Enforce** | Instant sub-millisecond veto for destructive commands (`rm -rf`, force push) |
+| **Scope Gate** | Task description, target file, Fullerenes AST graph | AST closure + linear probe head | **Advisory** | Flags edits outside dependency closure; warns on non-code distractors |
+| **Context Plane** | Raw tool logs, pytest traces, diffs | Diagnostic extraction & line compaction | **Active** | Reduces cumulative prompt tokens while preserving critical identifiers |
+| **Stop Gate** | Task checklist, exit codes, git diffstat | Diagnostic test check | **Experimental** | Advisory check before submit (demoted from enforce due to 42.1% false-block rate on N=1,000) |
+| **Loop Detector** | Rolling window of last N tool calls and diff hashes | Repetition detection & test signatures | **Advisory** | Intercepts dead-end loops and suggests surgical git stash rollback |
 
 ---
 
@@ -446,47 +445,73 @@ Evaluating Scope Gate file localization on public SWE-bench Lite issue descripti
 
 ### Empirical Validation 4: Offline Trajectory Replay on Public OpenHands Runs (`benchmark_trajectory_replay.py`)
 
-Replaying 100 historical execution trajectories (Qwen3-Coder-480B with OpenHands from `nebius/SWE-rebench-openhands-trajectories`), stratified into 50 resolved and 50 unresolved runs:
+Replaying 1,000 historical execution trajectories (Qwen3-Coder-480B with OpenHands from `nebius/SWE-rebench-openhands-trajectories` across 553 repositories), comprising 492 resolved and 508 unresolved runs:
 
 #### 1. Leak-Free Stop Gate Evaluation (Observable Signals Before Submit vs. PR Resolution)
 
-| Stop Gate Metric | Measured Value on Real Public Traces |
+| Stop Gate Metric | Measured Value on Real Public Traces (N=1,000) |
 | :--- | :--- |
-| **Total Evaluated Trajectories** | 100 (50 resolved, 50 unresolved) |
-| **True Positives (Allowed & PR Resolved)** | 22 |
-| **False Positives (Allowed but PR Unresolved)** | 23 |
-| **True Negatives (Blocked & PR Unresolved)** | 27 |
-| **False Negatives (Blocked but PR Resolved - False Block!)** | 28 |
-| **Precision (P(Resolved \| Allowed))** | 48.9% |
-| **Recall** | 44.0% |
-| **False-Block Rate (FN / Resolved)** | **56.0%** |
-| **Unresolved Interception Rate (TNR)** | 54.0% |
-| **Overall Resolution Classification Accuracy** | 49.0% |
+| **Total Evaluated Trajectories** | 1,000 (492 resolved, 508 unresolved across 553 repos) |
+| **True Positives (Allowed & PR Resolved)** | 285 |
+| **False Positives (Allowed but PR Unresolved)** | 231 |
+| **True Negatives (Blocked & PR Unresolved)** | 277 |
+| **False Negatives (Blocked but PR Resolved - False Block!)** | 207 |
+| **Precision (P(Resolved \| Allowed))** | 55.2% |
+| **Recall** | 57.9% |
+| **False-Block Rate (FN / Resolved)** | **42.1%** |
+| **Unresolved Interception Rate (TNR)** | 54.5% |
+| **Overall Resolution Classification Accuracy** | 56.2% (Chance baseline: 50.8%) |
+| **Multi-Feature Grouped-CV AUROC** | **0.6770** (Grouped by 553 Repositories) |
 
-#### 2. Information Loss Test (Next-Action Identifier Retention Across 6,308 Turns)
+#### 2. Compression vs. Non-Trivial Identifier Retention Across Baselines
 
-| Information Loss Metric | Measured Value |
-| :--- | :--- |
-| **Total Interaction Steps Tested** | 6,308 |
-| **Target Identifiers Present in Raw Observation** | 64,207 |
-| **Target Identifiers Preserved in Pruned Observation** | 49,085 |
-| **Identifier Retention Rate** | **76.45%** |
-| **Information Loss Rate** | 23.55% |
+Evaluating whether tool output compaction preserves the exact identifiers and paths referenced in the agent's immediate next turn (excluding keywords, built-ins, and trivial tokens across 54,605 target instances):
 
-#### 3. Cumulative Token Cost Math (Turn-by-Turn Context Accumulation)
+| Pruning Strategy | Char Compression | Identifier Retention | Information Loss |
+| :--- | :--- | :--- | :--- |
+| **BM25 Line Selection (35 lines)** | 33.38% | **98.36%** (53,711 / 54,605) | **1.64%** |
+| **Conservative ARMA Pruner (3000 chars)** | **55.55%** | **88.26%** (48,194 / 54,605) | 11.74% |
+| **Naive Head/Tail (15+15 lines)** | 44.66% | 88.71% (48,442 / 54,605) | 11.29% |
+| **Duplicate Read Cache** | 40.22% | 77.89% (42,534 / 54,605) | 22.11% |
+| **Standard ARMA Pruner (1200 chars)** | 59.55% | 77.82% (42,496 / 54,605) | 22.18% |
 
-| Cost Metric | Measured Value |
-| :--- | :--- |
-| **Raw Cumulative Input Tokens Processed** | 391,908,309 tokens |
-| **Pruned Cumulative Input Tokens Processed** | 213,415,676 tokens |
-| **Cumulative Input Token Reduction** | **45.54% reduction** |
-| **Cost @ $3.00/M (Zero Cache)** | Raw: $1,175.72 -> Pruned: $640.25 (45.5% cut) |
-| **Cost @ 80% Prompt Cache ($0.30 read / $3.00 write)** | Raw: $329.20 -> Pruned: $179.27 (45.5% cut) |
+##### Conservative ARMA Retention by Tool Category:
+- **Git Diffs**: 92.16% retention (7.84% loss)
+- **General Terminal Commands**: 91.25% retention (8.75% loss)
+- **Compiler / Syntax Errors**: 85.74% retention (14.26% loss)
+- **Test Tracebacks**: 76.47% retention (23.53% loss)
 
-#### Key Insights from Trajectory Replay:
-1. **The False-Block Reality**: Evaluating Stop Gate strictly on observable test outcomes before submit achieves 49.0% accuracy with a 56.0% False-Block Rate. Local test suites are imperfect proxies for global PR resolution (agents pass local unit tests that miss regressions, or fix bugs without executing the specific unit test).
-2. **Context Economics vs. Overflow**: Modern foundation models operate with 128k-1M token context windows. Pruning's real value is cumulative cost and latency reduction (a measured 45.5% cumulative input token cut), while retaining 76.5% of identifiers referenced in subsequent actions.
-3. **Replay vs. Live A/B**: Offline replays evaluate historical traces. Live execution (e.g. mini-swe-agent on SWE-bench Verified Mini) is required to evaluate whether blocking agents leads to self-healing or unrewarded token expenditure.
+*Takeaway*: BM25 line selection achieves **98.36% retention** (clearing the $\ge 95\%$ action-preservation threshold) while trimming 33.4% of characters. Conservative ARMA Pruning (3,000 chars) reaches 55.6% compression with 88.3% overall retention, outperforming aggressive 1,200-char compaction which loses over 22% of critical identifiers.
+
+#### 3. Full Cumulative Cost Model (Input + Output Tokens & Real Cache Pricing)
+
+Across 1,000 multi-turn sessions (3.86 Billion cumulative input tokens, 15.5M output tokens):
+
+| Pricing Tier (Claude 3.5 Sonnet) | Raw Cost | Pruned Cost | Dollar Cut (Upper Bound) |
+| :--- | :--- | :--- | :--- |
+| **Uncached** ($3.00/M input, $15.00/M output) | $11,815.22 | $7,286.38 | **38.3% cut** |
+| **80% Prompt Cache** ($0.30 read, $3.75 write, $15.00 output) | $4,054.99 | $2,560.47 | **36.9% cut** |
+
+*Upper Bound Caveat*: These figures represent an offline upper bound on fixed historical traces. In live execution, minor information loss will cause agents to take additional turns to re-inspect code, lowering net savings toward the 20-35% range observed in empirical literature (AgentDiet).
+
+#### 4. Early Failure Termination (EET) Feasibility
+
+Predicting final PR failure at early execution steps using observable trajectory features with GroupKFold cross-validation grouped by repository across 553 repositories:
+- **Trajectory Step Disparity**: Resolved runs average 117.6 steps; unresolved runs average 141.7 steps (1.21x step consumption).
+- **Step 10 Failure AUROC**: 0.5140 +/- 0.0361
+- **Step 20 Failure AUROC**: 0.5293 +/- 0.0249
+- **Step 30 Failure AUROC**: 0.5194 +/- 0.0331
+
+*Insight*: During early turns (steps 1-30), both successful and failing agents heavily encounter errors, stack traces, and test failures during initial exploration. Surface error counts in early steps do not reliably discriminate failure (AUROC remains near chance, 0.51-0.53); reliable early termination requires detecting repetitive dead-end edit cycles (loop detection) rather than counting early test failures.
+
+---
+
+## Next Milestone: Live A/B Execution on Verified Mini
+
+Offline replays evaluate historical transcripts under fixed agent actions. The definitive test of ARMA's value proposition is live execution on `mini-swe-agent` against SWE-bench Verified Mini:
+1. **Control**: Baseline agent without ARMA.
+2. **Treatment**: Agent wrapped with ARMA (Conservative Pruner + Risk Gate + LoopBreaker).
+3. **Target Metrics**: Real dollar cost per resolved issue, pass rate delta, and total turn count.
 
 ---
 
