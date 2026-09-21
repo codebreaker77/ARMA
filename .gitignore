@@ -41,3 +41,4 @@ ENV/
 # Logs and Data Exports
 *.log
 data/
+experiments/offline/data/
