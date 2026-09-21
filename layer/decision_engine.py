@@ -7,7 +7,9 @@ Classifier evaluates the fuzzy middle with calibrated confidence.
 
 import re
 from typing import Dict, Any, List, Optional, Tuple
-from micro_jev import MicroJevClient, Noul, Choice, Score
+from layer.embed_prior import Noul, Choice, Score
+from layer.classifier_ladder import ClassifierLadder, SupervisedEmbedClassifier, EmbedPrior
+from micro_jev import MicroJevClient
 from layer.evidence_db import EvidenceDB
 from layer.promotion_ladder import PromotionLadder
 from layer.gate_specs import StopGateSpec, ScopeGateSpec, RiskGateSpec, LoopDetectorSpec
@@ -81,13 +83,13 @@ class DecisionEngine:
     def __init__(
         self,
         evidence_db: Optional[EvidenceDB] = None,
-        classifier_client: Optional[MicroJevClient] = None,
+        classifier_client: Optional[Any] = None,
         default_mode: str = "shadow",
         calibration_path: Optional[str] = None,
         loop_breaker: Optional[Any] = None
     ):
         self.db = evidence_db or EvidenceDB()
-        self.classifier = classifier_client or MicroJevClient()
+        self.classifier = classifier_client or ClassifierLadder()
         self.ladder = PromotionLadder(db=self.db)
         self.calibration_path = calibration_path
         self.calibration = CalibrationStore.load(self.calibration_path)
