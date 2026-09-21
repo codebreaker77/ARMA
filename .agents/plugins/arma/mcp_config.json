@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "arma": {
+      "command": "python",
+      "args": ["-m", "layer.cli", "mcp"],
+      "env": {
+        "PYTHONPATH": "d:/labs/JEV"
+      }
+    }
+  }
+}
