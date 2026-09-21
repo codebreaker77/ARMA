@@ -210,6 +210,58 @@ def cmd_dashboard(args):
     run_dashboard(port=args.port)
 
 
+def cmd_checkpoints(args):
+    """Display available recovery checkpoints."""
+    import datetime
+    from layer.remediator import CheckpointManager
+    mgr = CheckpointManager()
+    ckpts = mgr.list_checkpoints(session_id=args.session)
+    if not ckpts:
+        print("No checkpoints found.")
+        return
+
+    print("=" * 85)
+    print(f"ARMA Recovery Checkpoints {'(Session: ' + args.session + ')' if args.session else '(All Sessions)'}")
+    print("=" * 85)
+    headers = ["Checkpoint ID", "Session ID", "Files", "Created At", "Label"]
+    rows = []
+    for c in ckpts:
+        dt = datetime.datetime.fromtimestamp(c["created_at"]).strftime("%Y-%m-%d %H:%M:%S")
+        rows.append([
+            c["checkpoint_id"],
+            c.get("session_id") or "global",
+            str(c.get("file_count", 0)),
+            dt,
+            c.get("label", "")
+        ])
+    print(format_table(headers, rows))
+    print("=" * 85)
+
+
+def cmd_rollback(args):
+    """Surgically restore codebase to a checkpoint."""
+    from layer.remediator import CheckpointManager
+    mgr = CheckpointManager()
+    if not args.checkpoint:
+        ckpts = mgr.list_checkpoints(session_id=args.session)
+        if not ckpts:
+            print("Error: No checkpoints available to roll back to.")
+            sys.exit(1)
+        target_ckpt = ckpts[0]["checkpoint_id"]
+        print(f"No checkpoint ID specified. Defaulting to latest checkpoint: {target_ckpt}")
+    else:
+        target_ckpt = args.checkpoint
+
+    target_files = [f.strip() for f in args.files.split(",")] if args.files else None
+    success = mgr.rollback(checkpoint_id=target_ckpt, target_files=target_files)
+    if success:
+        print(f"Successfully rolled back codebase to checkpoint '{target_ckpt}'.")
+        print("Prior modified files safely stashed in recovery stash (~/.arma/recovery_stash/).")
+    else:
+        print(f"Error: Failed to roll back to checkpoint '{target_ckpt}'.")
+        sys.exit(1)
+
+
 def main():
     parser = argparse.ArgumentParser(prog="arma", description="ARMA Layer CLI")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
@@ -261,6 +313,18 @@ def main():
     p_dash = subparsers.add_parser("dashboard", help="Start Real-Time Web Telemetry Dashboard")
     p_dash.add_argument("-p", "--port", type=int, default=4041, help="Dashboard port (default 4041)")
     p_dash.set_defaults(func=cmd_dashboard)
+
+    # checkpoints
+    p_ckpts = subparsers.add_parser("checkpoints", help="Display available recovery checkpoints")
+    p_ckpts.add_argument("-s", "--session", type=str, default=None, help="Filter by session ID")
+    p_ckpts.set_defaults(func=cmd_checkpoints)
+
+    # rollback
+    p_roll = subparsers.add_parser("rollback", help="Surgically restore codebase to a checkpoint")
+    p_roll.add_argument("-c", "--checkpoint", type=str, default=None, help="Checkpoint ID to restore")
+    p_roll.add_argument("-s", "--session", type=str, default=None, help="Session ID (used if checkpoint not specified)")
+    p_roll.add_argument("-f", "--files", type=str, default=None, help="Comma-separated files to restore (default: all snapshot files)")
+    p_roll.set_defaults(func=cmd_rollback)
 
     args = parser.parse_args()
     if not hasattr(args, "func"):

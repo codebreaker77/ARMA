@@ -83,13 +83,15 @@ class DecisionEngine:
         evidence_db: Optional[EvidenceDB] = None,
         classifier_client: Optional[MicroJevClient] = None,
         default_mode: str = "shadow",
-        calibration_path: Optional[str] = None
+        calibration_path: Optional[str] = None,
+        loop_breaker: Optional[Any] = None
     ):
         self.db = evidence_db or EvidenceDB()
         self.classifier = classifier_client or MicroJevClient()
         self.ladder = PromotionLadder(db=self.db)
         self.calibration_path = calibration_path
         self.calibration = CalibrationStore.load(self.calibration_path)
+        self.loop_breaker = loop_breaker
         for mod in ("stop_gate", "scope_gate", "risk_gate", "loop_detector"):
             self.ladder.set_mode(mod, default_mode)
 
@@ -502,12 +504,57 @@ class DecisionEngine:
         self,
         session_id: str,
         event_id: str,
-        recent_actions: List[Dict[str, Any]]
+        recent_actions: List[Dict[str, Any]],
+        repo_path: str = ".",
+        task_text: str = "",
+        test_status: str = "UNTESTED",
+        last_error: Optional[str] = None
     ) -> DecisionGateResult:
         """
         Loop Detector: Identifies thrashing and circular actions in a rolling window.
         """
         mode = self.module_modes["loop_detector"]
+
+        # Autonomous Remediation if loop_breaker is attached
+        if self.loop_breaker:
+            remediated, ckpt_id, pivot_text = self.loop_breaker.check_and_remediate(
+                session_id=session_id,
+                repo_path=repo_path,
+                task_text=task_text,
+                recent_actions=recent_actions,
+                test_status=test_status,
+                last_error=last_error
+            )
+            if remediated and pivot_text:
+                action = "pass" if mode == "shadow" else ("warn" if mode == "advisory" else "intervene")
+                allow = (mode == "shadow")
+                dec_id = self.db.record_decision(
+                    event_id=event_id,
+                    module="loop_detector",
+                    question_type="choice",
+                    question_text="remediation_status",
+                    answer_raw="thrashing_remediated",
+                    probability=0.0,
+                    confidence=1.0,
+                    backend="loop_breaker",
+                    model_version="1.0.0",
+                    threshold=0.70,
+                    mode=mode,
+                    action_taken=action,
+                    counterfactual_action="rollback"
+                )
+                return DecisionGateResult(
+                    module="loop_detector",
+                    allow=allow,
+                    mode=mode,
+                    action_taken=action,
+                    counterfactual_action="rollback",
+                    reason=f"Edit-fail loop broken: rolled back to {ckpt_id}. Pivot guidance synthesized.",
+                    confidence=1.0,
+                    probability=0.0,
+                    decision_id=dec_id,
+                    raw_decision={"pivot_text": pivot_text, "checkpoint_id": ckpt_id}
+                )
 
         if len(recent_actions) < 3:
             return DecisionGateResult(

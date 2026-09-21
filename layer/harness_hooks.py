@@ -9,6 +9,7 @@ from layer.evidence_db import EvidenceDB
 from layer.decision_engine import DecisionEngine, DecisionGateResult
 from layer.context_plane import ToolOutputPruner, PinnedFactsManager
 from layer.code_graph import CodeGraph
+from layer.remediator import CheckpointManager, LoopBreaker
 
 
 class ArmaHooks:
@@ -18,10 +19,14 @@ class ArmaHooks:
         self,
         db: Optional[EvidenceDB] = None,
         engine: Optional[DecisionEngine] = None,
-        code_graph: Optional[CodeGraph] = None
+        code_graph: Optional[CodeGraph] = None,
+        checkpoint_mgr: Optional[CheckpointManager] = None,
+        loop_breaker: Optional[LoopBreaker] = None
     ):
         self.db = db or EvidenceDB()
-        self.engine = engine or DecisionEngine(evidence_db=self.db)
+        self.ckpt_mgr = checkpoint_mgr or CheckpointManager()
+        self.loop_breaker = loop_breaker or LoopBreaker(checkpoint_mgr=self.ckpt_mgr)
+        self.engine = engine or DecisionEngine(evidence_db=self.db, loop_breaker=self.loop_breaker)
         self.code_graph = code_graph
         self.active_sessions: Dict[str, Dict[str, Any]] = {}
 
@@ -37,12 +42,23 @@ class ArmaHooks:
             # Predict initial impact if task references files
             pinned.set_impact_set(set(self.code_graph.indexed_files))
 
+        # Record initial clean state anchor
+        try:
+            self.loop_breaker.record_green_state(
+                session_id=session_id,
+                repo_path=repo_path,
+                label="Session Initial State"
+            )
+        except Exception:
+            pass
+
         self.active_sessions[session_id] = {
             "turn": 0,
             "recent_actions": [],
             "task_text": task_text,
             "pinned_facts": pinned,
-            "repo_path": repo_path
+            "repo_path": repo_path,
+            "last_error": None
         }
         return session_id
 
@@ -108,7 +124,59 @@ class ArmaHooks:
         recent.append({"tool": tool_name, "args": tool_args})
         sess["recent_actions"] = recent[-10:]
 
-        # 1. Evaluate Loop Detector
+        pinned: Optional[PinnedFactsManager] = sess.get("pinned_facts")
+        test_status = pinned.test_status if pinned else "UNTESTED"
+        task_text = sess.get("task_text", "")
+        repo_path = sess.get("repo_path", ".")
+        last_error = sess.get("last_error")
+
+        # 1. Autonomous Remediation & Loop Breaker Evaluation
+        thrashing_detected, ckpt_id, pivot_text = self.loop_breaker.check_and_remediate(
+            session_id=session_id,
+            repo_path=repo_path,
+            task_text=task_text,
+            recent_actions=recent,
+            test_status=test_status,
+            last_error=last_error
+        )
+        if thrashing_detected and pivot_text:
+            if pinned:
+                pinned.set_pivot_guidance(pivot_text)
+
+            mode = self.engine.ladder.get_mode("loop_detector")
+            action = "pass" if mode == "shadow" else ("warn" if mode == "advisory" else "intervene")
+            allow = (mode == "shadow")
+
+            dec_id = self.db.record_decision(
+                event_id=event_id,
+                module="loop_detector",
+                question_type="choice",
+                question_text="remediation_status",
+                answer_raw="thrashing_remediated",
+                probability=0.0,
+                confidence=1.0,
+                backend="loop_breaker",
+                model_version="1.0.0",
+                threshold=0.70,
+                mode=mode,
+                action_taken=action,
+                counterfactual_action="rollback"
+            )
+
+            return DecisionGateResult(
+                module="loop_detector",
+                allow=allow,
+                mode=mode,
+                action_taken=action,
+                counterfactual_action="rollback",
+                reason=f"Edit-fail loop broken: rolled back to {ckpt_id}. Pivot guidance injected into context.",
+                confidence=1.0,
+                probability=0.0,
+                decision_id=dec_id,
+                raw_decision={"pivot_text": pivot_text, "checkpoint_id": ckpt_id}
+            )
+
+        # Standard classifier loop evaluation
         loop_res = self.engine.evaluate_loop(session_id, event_id, recent)
         if loop_res.counterfactual_action == "intervene" or not loop_res.allow:
             return loop_res
@@ -159,6 +227,17 @@ class ArmaHooks:
         if is_test and pinned:
             passed = exit_code == 0 and ("FAILED" not in raw_output and "FAILURES" not in raw_output)
             pinned.update_test_status(passed=passed, exit_code=exit_code)
+            if passed:
+                repo_p = sess.get("repo_path", ".")
+                self.loop_breaker.record_green_state(
+                    session_id=session_id,
+                    repo_path=repo_p,
+                    label=f"Turn {sess.get('turn', 0)} Tests Passed"
+                )
+                sess["last_error"] = None
+                pinned.set_pivot_guidance(None)
+            else:
+                sess["last_error"] = raw_output[:300]
 
         # Prune output using ARMA ToolOutputPruner
         pruned = ToolOutputPruner.prune(raw_output)

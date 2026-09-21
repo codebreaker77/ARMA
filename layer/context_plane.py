@@ -117,6 +117,7 @@ class PinnedFactsManager:
         self.touched_files: Set[str] = set()
         self.test_status: str = "UNTESTED"
         self.impact_set: Set[str] = set()
+        self.pivot_guidance: Optional[str] = None
 
     def update_task_checklist(self, checklist: List[str]):
         self.checklist = checklist
@@ -129,6 +130,9 @@ class PinnedFactsManager:
 
     def set_impact_set(self, impact_set: Set[str]):
         self.impact_set = impact_set
+
+    def set_pivot_guidance(self, guidance: Optional[str]):
+        self.pivot_guidance = guidance
 
     def format_pinned_facts(self) -> str:
         """Format the critical facts into a high-density system instruction block."""
@@ -146,6 +150,9 @@ class PinnedFactsManager:
 
         if self.impact_set:
             facts.append(f"4. Verified Blast Radius: {len(self.impact_set)} files permitted")
+
+        if self.pivot_guidance:
+            facts.append(f"\n{self.pivot_guidance}\n")
 
         facts.append("Rule: Do NOT declare completion until all checklist requirements pass tests.")
         return "\n".join(facts)
