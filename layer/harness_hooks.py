@@ -4,30 +4,45 @@ Provides direct programmatic hooks for harnesses like OpenCode, Claude Code,
 and custom Python agent loops.
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Set
 from layer.evidence_db import EvidenceDB
 from layer.decision_engine import DecisionEngine, DecisionGateResult
+from layer.context_plane import ToolOutputPruner, PinnedFactsManager
+from layer.code_graph import CodeGraph
 
 
 class ArmaHooks:
     """Standardized hook controller for coding harnesses."""
 
-    def __init__(self, db: Optional[EvidenceDB] = None, engine: Optional[DecisionEngine] = None):
+    def __init__(
+        self,
+        db: Optional[EvidenceDB] = None,
+        engine: Optional[DecisionEngine] = None,
+        code_graph: Optional[CodeGraph] = None
+    ):
         self.db = db or EvidenceDB()
         self.engine = engine or DecisionEngine(evidence_db=self.db)
+        self.code_graph = code_graph
         self.active_sessions: Dict[str, Dict[str, Any]] = {}
 
-    def on_session_start(self, repo_path: str, harness: str, task_text: str) -> str:
+    def on_session_start(self, repo_path: str, harness: str, task_text: str, checklist: Optional[List[str]] = None) -> str:
         """Called when an agent session begins."""
         session_id = self.db.start_session(
             repo_path=repo_path,
             harness=harness,
             task_text=task_text
         )
+        pinned = PinnedFactsManager(task_checklist=checklist or [task_text])
+        if self.code_graph:
+            # Predict initial impact if task references files
+            pinned.set_impact_set(set(self.code_graph.indexed_files))
+
         self.active_sessions[session_id] = {
             "turn": 0,
             "recent_actions": [],
-            "task_text": task_text
+            "task_text": task_text,
+            "pinned_facts": pinned,
+            "repo_path": repo_path
         }
         return session_id
 
@@ -107,11 +122,16 @@ class ArmaHooks:
         # 3. Evaluate Scope Gate for file write / edit operations
         if tool_name in ("write_to_file", "replace_file_content", "edit_file"):
             target = tool_args.get("TargetFile") or tool_args.get("path") or tool_args.get("file") or ""
+            target_str = str(target)
+            pinned: Optional[PinnedFactsManager] = sess.get("pinned_facts")
+            if pinned and target_str:
+                pinned.record_file_touched(target_str)
+
             return self.engine.evaluate_scope(
                 session_id=session_id,
                 event_id=event_id,
                 task_text=sess.get("task_text", ""),
-                target_file=str(target)
+                target_file=target_str
             )
 
         # Default pass for benign read tools
@@ -126,6 +146,37 @@ class ArmaHooks:
             probability=1.0
         )
 
+    def on_tool_output(self, session_id: str, tool_name: str, raw_output: str, exit_code: int = 0) -> str:
+        """
+        Prunes verbose tool output (test logs, diffs, compiler errors)
+        and updates session invariants in PinnedFactsManager.
+        """
+        sess = self.active_sessions.get(session_id, {})
+        pinned: Optional[PinnedFactsManager] = sess.get("pinned_facts")
+
+        # Check if output is from a test runner
+        is_test = any(kw in raw_output for kw in ("pytest", "unittest", "FAILED", "PASSED", "Ran "))
+        if is_test and pinned:
+            passed = exit_code == 0 and ("FAILED" not in raw_output and "FAILURES" not in raw_output)
+            pinned.update_test_status(passed=passed, exit_code=exit_code)
+
+        # Prune output using ARMA ToolOutputPruner
+        pruned = ToolOutputPruner.prune(raw_output)
+        return pruned
+
+    def on_prepare_prompt(self, session_id: str, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Injects pinned invariants (checklist, test status, blast radius)
+        at the context tail right before the LLM generates a response.
+        """
+        sess = self.active_sessions.get(session_id, {})
+        pinned: Optional[PinnedFactsManager] = sess.get("pinned_facts")
+        if not pinned:
+            return messages
+
+        return pinned.inject_into_messages(messages)
+
     def on_outcome_observed(self, decision_id: str, label: str, source: str = "test_runner"):
         """Record ground truth (e.g. test_pass, git_reverted, user_approved)."""
         self.db.record_outcome(decision_id=decision_id, label=label, source=source)
+

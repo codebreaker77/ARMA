@@ -13,10 +13,11 @@ import argparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import urllib.request
 import urllib.error
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Union
 
 from layer.evidence_db import EvidenceDB
 from layer.decision_engine import DecisionEngine
+from layer.context_plane import ToolOutputPruner, PinnedFactsManager
 
 
 DEFAULT_PORT = 4040
@@ -30,6 +31,7 @@ class InterceptorHandler(BaseHTTPRequestHandler):
     db: EvidenceDB = None
     upstream_url: str = DEFAULT_UPSTREAM
     current_session_id: str = None
+    pinned_mgr: Optional[PinnedFactsManager] = None
 
     def log_message(self, format, *args):
         # Override to suppress default HTTP access logs in console
@@ -64,12 +66,15 @@ class InterceptorHandler(BaseHTTPRequestHandler):
         # If it is an OpenAI or Anthropic chat completion endpoint
         if self.path.endswith("/chat/completions") or self.path.endswith("/messages"):
             modified_body = self._audit_and_preprocess(payload)
+            if modified_body is False:
+                # Request was hard-blocked by policy; response already sent
+                return
             self._proxy_pass("POST", modified_body or body)
         else:
             self._proxy_pass("POST", body)
 
-    def _audit_and_preprocess(self, payload: Optional[Dict[str, Any]]) -> Optional[bytes]:
-        """Inspect prompt, evaluate pre-execution gates, and optionally inject pinned facts."""
+    def _audit_and_preprocess(self, payload: Optional[Dict[str, Any]]) -> Union[bytes, bool, None]:
+        """Inspect prompt, evaluate pre-execution gates, prune bloated logs, and inject pinned facts."""
         if not payload or not self.engine:
             return None
 
@@ -80,6 +85,7 @@ class InterceptorHandler(BaseHTTPRequestHandler):
                 harness="proxy_intercept",
                 task_text="Automated Intercepted Session"
             )
+            self.pinned_mgr = PinnedFactsManager(task_checklist=["Execute requested task with high fidelity"])
 
         messages = payload.get("messages", [])
         if not messages:
@@ -109,8 +115,36 @@ class InterceptorHandler(BaseHTTPRequestHandler):
             if not gate_res.allow:
                 # Return synthetic rejection if hard-denied in enforce mode
                 self._send_blocked_response(gate_res.reason)
-                return None
+                return False
 
+        # 3. Context Plane: Prune tool outputs and historical bloating
+        modified = False
+        for msg in messages:
+            msg_content = msg.get("content")
+            if isinstance(msg_content, str) and len(msg_content) > 1000:
+                pruned = ToolOutputPruner.prune(msg_content)
+                if len(pruned) < len(msg_content):
+                    msg["content"] = pruned
+                    modified = True
+            elif isinstance(msg_content, list):
+                # Anthropic / structured content blocks
+                for block in msg_content:
+                    if isinstance(block, dict) and block.get("type") == "tool_result":
+                        raw_c = block.get("content", "")
+                        if isinstance(raw_c, str) and len(raw_c) > 1000:
+                            pruned = ToolOutputPruner.prune(raw_c)
+                            if len(pruned) < len(raw_c):
+                                block["content"] = pruned
+                                modified = True
+
+        # 4. Context Plane: Inject pinned facts to the tail
+        if self.pinned_mgr:
+            messages = self.pinned_mgr.inject_into_messages(messages)
+            payload["messages"] = messages
+            modified = True
+
+        if modified:
+            return json.dumps(payload).encode("utf-8")
         return None
 
     def _proxy_pass(self, method: str, body: Optional[bytes] = None):
