@@ -4,9 +4,10 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Python: 3.9+](https://img.shields.io/badge/Python-3.9+-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![Architecture: Three--Plane](https://img.shields.io/badge/Architecture-Three--Plane-indigo.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
-[![Status: Phase--3--Active](https://img.shields.io/badge/Status-Phase--3--Active-success.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
+[![Status: Phase--4--Active](https://img.shields.io/badge/Status-Phase--4--Active-success.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
 [![Token--Compression: 75.7%](https://img.shields.io/badge/Token--Compression-75.7%25-brightgreen.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
 [![Calibrated--ECE: 0.0124](https://img.shields.io/badge/Calibrated--ECE-0.0124-blueviolet.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
+[![MCP: Native--JSON--RPC](https://img.shields.io/badge/MCP-Native--JSON--RPC-orange.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
 [![Local--First](https://img.shields.io/badge/Design-Local--First-black.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
 
 ---
@@ -284,6 +285,60 @@ Evaluated across 50 diverse decision traces spanning all 4 gates:
 
 ---
 
+## Live Harness Integration & Real-Time Monitor (Phase 4)
+
+Phase 4 turns ARMA into an operational developer platform with zero-configuration execution, desktop MCP assistant support, and a high-density live telemetry dashboard.
+
+### 1. Turnkey Harness Execution (`arma run`)
+
+Run any coding harness directly through ARMA. The runner automatically launches the interceptor proxy in the background, sets `ANTHROPIC_BASE_URL` and `OPENAI_BASE_URL`, registers session telemetry, and emits a post-session diagnostic summary card upon exit:
+
+```bash
+# Execute Claude Code with ARMA decision and context planes active
+python -m layer.cli run claude
+
+# Execute Aider with automatic proxy interception
+python -m layer.cli run aider --model anthropic/claude-3-5-sonnet-20241022
+
+# Execute custom test suites or agent scripts
+python -m layer.cli run python agent_loop.py
+```
+
+### 2. Native Model Context Protocol (MCP) Server (`arma mcp`)
+
+ARMA exposes its decision gates, code graph blast radius calculator, and context pruner as native tools conforming to the official MCP JSON-RPC 2.0 stdio specification.
+
+#### Connecting Claude Desktop or Cursor (`claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "arma": {
+      "command": "python",
+      "args": ["-m", "layer.cli", "mcp"]
+    }
+  }
+}
+```
+
+#### Exposed MCP Tools:
+- `arma_check_stop`: Audits task requirements and test outcomes before the agent exits.
+- `arma_predict_impact`: Computes Fullerenes transitive blast radius for planned file edits.
+- `arma_prune_output`: Compresses verbose test outputs and terminal logs by 70-90%.
+- `arma_audit_command`: Evaluates shell commands against Risk Gate hard invariants.
+
+### 3. Real-Time Web Telemetry Dashboard (`arma dashboard`)
+
+Launches a zero-dependency dark-mode monitoring dashboard on `http://127.0.0.1:4041`:
+```bash
+python -m layer.cli dashboard --port 4041
+```
+- **Live Decision Stream**: Real-time inspection of gate evaluations, probabilities, and actions.
+- **Token Compression Gauge**: Live tracking of tokens saved and latency reduction.
+- **Fullerenes Code Graph Visualizer**: Transitive dependency inspection and symbol indexing.
+- **Calibration Status Cards**: Real-time display of module temperatures, thresholds, and ECE.
+
+---
+
 ## Repository Structure
 
 ```
@@ -307,6 +362,9 @@ ARMA/
 │   ├── distill_exporter.py        # Triplet and instruction tuning dataset exporter
 │   ├── interceptor_proxy.py       # Universal HTTP reverse proxy
 │   ├── harness_hooks.py           # Native lifecycle hooks for Claude Code / OpenCode
+│   ├── runner.py                  # Turnkey harness runner (arma run)
+│   ├── mcp_server.py              # Model Context Protocol stdio server (arma mcp)
+│   ├── web_dashboard.py           # Real-time web telemetry dashboard (arma dashboard)
 │   └── cli.py                     # Command-line dashboard and calibration tool
 ├── micro_jev.py                   # Local System 1 non-autoregressive decision engine
 ├── dual_process_pipeline.py       # System 1 (MicroJev) + System 2 (Gemma 3) reference pipeline
@@ -317,7 +375,10 @@ ARMA/
     ├── test_decision_engine.py    # Decision Gates unit tests
     ├── test_code_graph.py         # Fullerenes Code Graph unit tests
     ├── test_context_plane.py      # Context Plane unit tests
-    └── test_replay.py             # Replay, Calibration, and DistillExporter unit tests
+    ├── test_replay.py             # Replay, Calibration, and DistillExporter unit tests
+    ├── test_runner.py             # Harness Runner unit tests
+    ├── test_mcp.py                # Model Context Protocol server unit tests
+    └── test_web_dashboard.py      # Web Dashboard and REST API unit tests
 ```
 
 ---
@@ -325,5 +386,6 @@ ARMA/
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
 
 

@@ -187,6 +187,29 @@ def cmd_export(args):
     print("=" * 70)
 
 
+def cmd_run(args):
+    """Execute a coding harness with automatic ARMA proxy intercept and telemetry."""
+    from layer.runner import HarnessRunner
+    if not args.cmd:
+        print("Error: No harness command specified. Example: arma run claude")
+        sys.exit(1)
+    runner = HarnessRunner(port=args.port)
+    exit_code = runner.run(command=args.cmd)
+    sys.exit(exit_code)
+
+
+def cmd_mcp(args):
+    """Start native Model Context Protocol (MCP) stdio server."""
+    from layer.mcp_server import run_mcp_server
+    run_mcp_server()
+
+
+def cmd_dashboard(args):
+    """Launch the ARMA Real-Time Web Telemetry Dashboard."""
+    from layer.web_dashboard import run_dashboard
+    run_dashboard(port=args.port)
+
+
 def main():
     parser = argparse.ArgumentParser(prog="arma", description="ARMA Layer CLI")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
@@ -223,6 +246,21 @@ def main():
     p_exp.add_argument("-m", "--module", type=str, default=None, help="Filter by specific module")
     p_exp.add_argument("--disagreements-only", action="store_true", help="Only export high-leverage disagreement samples")
     p_exp.set_defaults(func=cmd_export)
+
+    # run
+    p_run = subparsers.add_parser("run", help="Launch an agent harness with ARMA interception")
+    p_run.add_argument("-p", "--port", type=int, default=4040, help="Proxy port (default 4040)")
+    p_run.add_argument("cmd", nargs=argparse.REMAINDER, help="Harness command to run (e.g. claude, aider)")
+    p_run.set_defaults(func=cmd_run)
+
+    # mcp
+    p_mcp = subparsers.add_parser("mcp", help="Start native Model Context Protocol (MCP) stdio server")
+    p_mcp.set_defaults(func=cmd_mcp)
+
+    # dashboard
+    p_dash = subparsers.add_parser("dashboard", help="Start Real-Time Web Telemetry Dashboard")
+    p_dash.add_argument("-p", "--port", type=int, default=4041, help="Dashboard port (default 4041)")
+    p_dash.set_defaults(func=cmd_dashboard)
 
     args = parser.parse_args()
     if not hasattr(args, "func"):
