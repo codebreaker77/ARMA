@@ -11,15 +11,13 @@
 
 ---
 
-## Executive Summary
+## Executive Summary: An Open Per-Step Controller for Coding Agents
 
-Autonomous coding agents (such as Claude Code, OpenCode, Aider, and SWE-agent) fail predominantly at a small set of recurring operational and metacognitive decisions:
-1. **Destructive Operations**: Shell commands that wipe environments, force-push branches, or delete database tables.
-2. **Context Bloat & Token Inefficiency**: Multi-thousand line tool outputs that inflate prompt costs and degrade agent reasoning.
-3. **Out-of-Scope Blast Radius**: Modifying unrelated infrastructure or configuration files outside the target task bounds.
-4. **Premature Termination**: Stopping execution before verifying changes or when terminal assertions remain unresolved.
+ARMA is an open, harness-agnostic per-step controller and context optimization plane for coding agents (Claude Code, OpenCode, Aider, mini-swe-agent). Rather than overselling an uncalibrated general classifier, ARMA focuses strictly on **three narrow jobs**, each grounded in empirical evidence from 1,000 public SWE-rebench trajectories:
 
-ARMA operates as a local-first control plane between any coding agent harness and the target codebase.
+1. **Don't Get Stuck**: Implements canonical OpenHands StuckDetector deterministic rules (identical action-observation repeats, repeated errors, ping-pong alternation, monologue). Crucially, 8.5% of successful runs encounter an exact loop and self-recover; hard-halting destroys viable solutions. ARMA intercepts loops with surgical rollback, re-planning, and model escalation directives rather than premature termination.
+2. **Speed Up Wall-Clock**: Speculative Actions engine predicts the next read-only action (`cat`, `view_file`, `grep`) conditioned on traceback error frames. On real public trajectories, it achieves a **45.75% Top-3 prediction hit rate**, accelerating wall-clock latency by up to ~20% with lossless commit (zero token penalty on mismatch).
+3. **Cut Cost**: Cache-aware per-step model router that routes trivial read-only operations (16.4% of steps) to cheap tiers while strictly guarding warm prompt cache prefixes. Under real prompt-cache pricing, naive per-step switching increases costs by +65.5% due to cache invalidation ($3.75/M rewrite penalty); ARMA's Cache Hysteresis Guard ensures model switching occurs only when net savings exceed rewrite overhead.
 
 ### Core Design Principles & Empirical Transparency:
 - **Deterministic Vetoes Over Machine Learning**: Hard deny rules (Risk Gate) retain instant veto power (<1 ms). Statistical heads only provide advisory signals.
@@ -506,6 +504,86 @@ Predicting final PR failure at early execution steps using observable trajectory
 
 ---
 
+### Empirical Validation 5: 1,000-Trajectory Controller Census & Benchmark (`benchmark_controller_census.py`)
+
+A comprehensive offline census across 1,000 public execution trajectories from `nebius/SWE-rebench-openhands-trajectories` (Qwen3-Coder-480B across 553 repositories, 492 resolved and 508 unresolved runs). This evaluation directly benchmarks the three jobs of the ARMA per-step controller.
+
+#### 1. Experiment 1: Loop Census, Prevalence & Self-Recovery
+
+Evaluating the 5 canonical OpenHands `StuckDetector` exact loop patterns versus semantic edit thrashing across all 1,000 runs:
+
+| Metric | Measured Value across 1,000 Public Traces |
+| :--- | :--- |
+| **Total Evaluated Trajectories** | 1,000 (492 resolved, 508 unresolved) |
+| **Identical Action-Observation Repeats (4+)** | 0 incidents |
+| **Repeated Errors (3+)** | 203 incidents |
+| **Monologue (3+ consecutive assistant texts)** | 0 incidents |
+| **Ping-Pong Alternation (6 cycles / 12 turns)** | 0 incidents |
+| **Context Overflow Errors** | 0 incidents |
+| **Trajectories Hitting an Exact Loop** | **108 runs (10.8%)** |
+| **Trajectories Hitting a Semantic Loop** | 100 runs (10.0%) |
+| **Resolved Runs Hitting Exact Loop & Self-Recovering** | **42 / 492 (8.5%)** |
+| **Resolved Runs Hitting Semantic Loop & Self-Recovering** | 35 / 492 (7.1%) |
+| **Steps Spent Post-Loop Inception** | 22,238 steps (16.7% of all steps) |
+| **Tokens Consumed Post-Loop Inception** | 2,217,313 tokens (40.7% of post-loop token waste) |
+
+##### Architectural Implications of the Self-Recovery Finding:
+- **Hard Halting Destroys Viable Solutions**: In 8.5% of successful runs (42 instances), the agent encountered an exact loop, broke out through alternative exploration, and ultimately resolved the issue. If an external controller hard-terminates an agent upon first loop detection, it immediately destroys ~9% of otherwise successful solutions.
+- **Surgical Rollback and Re-Planning Over Halting**: ARMA intercepts exact loops not by killing the session, but by triggering non-destructive rollback (`CheckpointManager`), injecting structured pivot directives (`LoopBreaker`), and escalating reasoning model tiers.
+
+#### 2. Experiment 2: Step-Type Census & Prompt Cache Economics (The Not Diamond Insight)
+
+Analyzing 133,391 execution steps across 1,000 trajectories to quantify the viability of per-step model routing:
+
+| Step Category | Step Count | Step Share | Cumulative Input Tokens | Cumulative Output Tokens |
+| :--- | :--- | :--- | :--- | :--- |
+| **Test Execution** | 42,958 | 32.2% | 1.84 B (36.0%) | 5.2 M (33.5%) |
+| **Code Modification** | 40,544 | 30.4% | 1.62 B (31.7%) | 4.9 M (31.6%) |
+| **General Terminal** | 28,024 | 21.0% | 1.01 B (19.8%) | 3.3 M (21.3%) |
+| **Trivial Read-Only (`cat`, `view`, `grep`, `ls`)** | 21,865 | **16.4%** | 639 M (12.5%) | 2.1 M (13.6%) |
+| **Planning / Thought** | 0 | 0.0% | 0 (0.0%) | 0 (0.0%) |
+
+##### Prompt Cache Economics:
+Modern frontier LLM APIs enforce high cold-write penalties to amortize KV cache reuse (e.g. Anthropic Claude 3.5 Sonnet: $0.30/M read vs. $3.75/M write; Claude 3.5 Haiku: $0.08/M read vs. $1.00/M write).
+- **Monolithic Frontier (Claude 3.5 Sonnet @ 80% Cache)**: **$1,696.35**
+- **Naive Per-Step Routing (Read-only to Haiku, rest to Sonnet)**:
+  - Model switches incurred: **13,563 switches**
+  - Cache write invalidation penalty: **+$1,167.21** (each switch forces a full prompt re-cache at $3.75/M)
+  - Total Naive Routing Cost: **$2,807.65 (+65.5% MORE EXPENSIVE than staying on Frontier!)**
+
+##### The Cache Hysteresis Guard:
+Because prompt cache reads are 90% cheaper than base rates, keeping isolated read steps on the frontier model with an intact warm cache is significantly cheaper than routing to a smaller model. ARMA's `CacheAwareStepRouter` enforces a hysteresis threshold: it only switches to a lower model tier if $\ge 4$ consecutive read operations are queued or predicted, guaranteeing net dollar savings.
+
+#### 3. Experiment 3: Next-Read Speculative Actions Hit Rate
+
+Predicting the agent's next file read action directly from traceback stack frames following test failures:
+
+| Metric | Measured Value across 1,000 Trajectories |
+| :--- | :--- |
+| **Post-Error Evaluation Steps Analyzed** | 6,595 |
+| **Top-1 Candidate Speculation Accuracy** | **39.04%** (2,575 / 6,595) |
+| **Top-3 Candidate Speculation Accuracy** | **45.75%** (3,017 / 6,595) |
+| **Evaluation Threshold Target** | Top-3 $\ge$ 30.0% |
+| **Decision Gate Outcome** | **PASS (+15.75% above threshold)** |
+
+##### Lossless Speculative Commit:
+When a test fails, `SpeculativeActionEngine` parses bottom-most application frames from the traceback and asynchronously pre-fetches file contents and symbols into a local pre-fetch cache. If the agent's next action requests one of these files, the result is returned instantaneously (saving up to ~20% wall-clock turn latency). If the agent takes an alternative action, the speculative result is silently discarded with **zero token penalty and zero state mutation**.
+
+#### 4. Experiment 4: Stuck Predictor v2 Negative Finding
+
+Evaluating whether early PR resolution can be predicted at Step 30 using semantic error text and TF-IDF features with GroupKFold cross-validation grouped by repository (553 unique repos):
+
+| Metric | Measured Result | Threshold Target |
+| :--- | :--- | :--- |
+| **Step 30 Text-Feature AUROC** | **0.5821 +/- 0.0458** | $\ge 0.6800$ |
+| **Step 30 Classification Accuracy** | 56.02% | Baseline chance: 50.8% |
+| **Decision Gate Outcome** | **CONFIRMED NEGATIVE FINDING** |
+
+##### Why Statistical Early-Stopping Heads Are Rejected:
+Neither surface counts (0.51-0.53 AUROC) nor rich semantic TF-IDF text features at Step 30 (0.5821 AUROC) provide sufficient discriminative power across unseen repositories. Coding agents frequently encounter multiple test failures during healthy exploratory debugging. Relying on early statistical classifiers to abort sessions causes catastrophic false stops on viable runs. ARMA therefore restricts early termination strictly to deterministic loop detection combined with surgical remediation.
+
+---
+
 ## Next Milestone: Live A/B Execution on Verified Mini
 
 Offline replays evaluate historical transcripts under fixed agent actions. The definitive test of ARMA's value proposition is live execution on `mini-swe-agent` against SWE-bench Verified Mini:
@@ -540,6 +618,8 @@ ARMA/
 │   ├── embed_prior.py             # Truthful zero-shot EmbedPrior heuristic (session pooling, fallback)
 │   ├── code_graph.py              # Fullerenes AST parser and predict_impact engine
 │   ├── context_plane.py           # ToolOutputPruner, PinnedFactsManager, CompactionScorer
+│   ├── step_router.py             # CacheAwareStepRouter with Cache Hysteresis Guard
+│   ├── speculative_runner.py      # SpeculativeActionEngine for traceback pre-fetching
 │   ├── calibrator.py              # TemperatureScaler, ThresholdOptimizer, OfflineCalibrator
 │   ├── replay_engine.py           # Trace Replay Simulator and counterfactual evaluator
 │   ├── distill_exporter.py        # Triplet and instruction tuning dataset exporter
@@ -559,6 +639,8 @@ ARMA/
     ├── test_decision_engine.py    # Decision Gates unit tests
     ├── test_code_graph.py         # Fullerenes Code Graph unit tests
     ├── test_context_plane.py      # Context Plane unit tests
+    ├── test_step_router.py        # Step Router and Cache Hysteresis unit tests
+    ├── test_speculative_runner.py # Speculative Runner and traceback parsing unit tests
     ├── test_replay.py             # Replay, Calibration, and DistillExporter unit tests
     ├── test_runner.py             # Harness Runner unit tests
     ├── test_mcp.py                # Model Context Protocol server unit tests

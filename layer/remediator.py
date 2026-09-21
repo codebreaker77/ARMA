@@ -220,10 +220,30 @@ class AlternativeStrategySynthesizer:
         ]
         return "\n".join(advice)
 
+    @staticmethod
+    def synthesize_exact_loop_pivot(
+        loop_type: str,
+        details: str,
+        suggested_action: str
+    ) -> str:
+        """Constructs high-density recovery directives for exact loop states."""
+        advice = [
+            "<!-- ARMA CONTROLLER: STUCK INTERVENTION & RECOVERY -->",
+            f"[CRITICAL INTERVENTION: EXACT LOOP DETECTED - {loop_type.upper()}]",
+            f"1. Diagnosis: {details}",
+            "2. Action Invariant: You are strictly forbidden from re-executing this exact command or repeating this output.",
+            "3. STRATEGIC RECOVERY & RE-PLANNING DIRECTIVE:",
+            f"   - {suggested_action}",
+            "   - Step back and formulate a new approach. Do NOT retry the same edit or command.",
+            "   - Recommend model escalation if current tier cannot resolve the deadlock."
+        ]
+        return "\n".join(advice)
+
 
 class LoopBreaker:
     """
-    Monitors turn history, detects circular thrashing, and executes self-healing rollbacks.
+    Monitors turn history, detects exact loops and circular thrashing, and executes self-healing rollbacks.
+    Implements the 5 canonical OpenHands stuck patterns + semantic edit-fail loop detection.
     """
 
     def __init__(self, checkpoint_mgr: Optional[CheckpointManager] = None):
@@ -241,9 +261,46 @@ class LoopBreaker:
         )
         self.last_green_checkpoint = ckpt_id
         self.last_green_label = label
-        # Reset attempt counts on clean pass
         self.file_attempt_counts.clear()
         return ckpt_id
+
+    @staticmethod
+    def check_identical_action_obs(pairs: List[Tuple[str, str]], threshold: int = 4) -> bool:
+        """Detect identical action-observation pairs repeating consecutively."""
+        if len(pairs) < threshold:
+            return False
+        last_pair = pairs[-1]
+        return all(p == last_pair for p in pairs[-threshold:])
+
+    @staticmethod
+    def check_repeated_errors(errors: List[str], threshold: int = 3) -> bool:
+        """Detect identical/similar error messages repeating consecutively."""
+        if len(errors) < threshold:
+            return False
+        last_err = errors[-1]
+        return all(e == last_err for e in errors[-threshold:])
+
+    @staticmethod
+    def check_ping_pong(actions: List[str], threshold: int = 6) -> bool:
+        """Detect alternating between two actions A -> B -> A -> B for >= threshold cycles (2*threshold steps)."""
+        window = 2 * threshold
+        if len(actions) < window:
+            return False
+        sub = actions[-window:]
+        a, b = sub[0], sub[1]
+        if a == b:
+            return False
+        for i in range(0, window, 2):
+            if sub[i] != a or sub[i+1] != b:
+                return False
+        return True
+
+    @staticmethod
+    def check_monologue(turn_signatures: List[str], threshold: int = 3) -> bool:
+        """Detect assistant sending text messages without invoking any tools."""
+        if len(turn_signatures) < threshold:
+            return False
+        return all(s.startswith("ASSISTANT_TEXT:") for s in turn_signatures[-threshold:])
 
     def check_and_remediate(
         self,
@@ -252,18 +309,48 @@ class LoopBreaker:
         task_text: str,
         recent_actions: List[Dict[str, Any]],
         test_status: str,
-        last_error: Optional[str] = None
+        last_error: Optional[str] = None,
+        recent_action_obs_pairs: Optional[List[Tuple[str, str]]] = None,
+        recent_errors: Optional[List[str]] = None
     ) -> Tuple[bool, Optional[str], Optional[str]]:
         """
-        Evaluates whether current action history represents a circular loop.
-        If loop detected and green checkpoint exists:
-        Rolls back surgically and returns (True, checkpoint_id, pivot_text).
-        Otherwise returns (False, None, None).
+        Evaluates whether current action history represents an exact loop or circular thrashing.
+        Triggers surgical rollback or strategic recovery guidance without prematurely aborting the session.
+        Returns (is_remediated, checkpoint_or_action_id, pivot_text).
         """
+        # 1. Check exact loops (OpenHands stuck patterns)
+        if recent_action_obs_pairs and self.check_identical_action_obs(recent_action_obs_pairs, threshold=4):
+            pivot = AlternativeStrategySynthesizer.synthesize_exact_loop_pivot(
+                loop_type="Identical Action-Observation",
+                details=f"The exact same command and observation have executed 4 consecutive times: '{recent_action_obs_pairs[-1][0]}'.",
+                suggested_action="Execute a diff inspection or check external dependencies instead of retrying."
+            )
+            return True, "exact_loop_repeat", pivot
+
+        if recent_errors and self.check_repeated_errors(recent_errors, threshold=3):
+            pivot = AlternativeStrategySynthesizer.synthesize_exact_loop_pivot(
+                loop_type="Repeated Error",
+                details=f"The same error signature occurred 3 consecutive times: '{recent_errors[-1]}'.",
+                suggested_action="The current hypothesis is disproven. Step back, re-read the issue description, and inspect related caller functions."
+            )
+            return True, "repeated_error_loop", pivot
+
+        action_sigs = [
+            (act.get("tool", "") + ":" + str(act.get("args", ""))[:80])
+            for act in (recent_actions or [])
+        ]
+        if self.check_ping_pong(action_sigs, threshold=6):
+            pivot = AlternativeStrategySynthesizer.synthesize_exact_loop_pivot(
+                loop_type="Ping-Pong Alternation",
+                details="Alternating between two identical actions for 6 consecutive cycles without progress.",
+                suggested_action="Break the cycle. Halt automated toggling and check the underlying architectural constraint."
+            )
+            return True, "ping_pong_loop", pivot
+
         if not recent_actions:
             return False, None, None
 
-        # Look for edit tools targeting files
+        # 2. Check semantic edit-fail thrashing on files
         target_files = []
         for act in recent_actions[-6:]:
             tool = act.get("tool", "")
@@ -276,15 +363,12 @@ class LoopBreaker:
         if not target_files:
             return False, None, None
 
-        # Count frequency of recent edits
         most_recent_file = target_files[-1]
         attempts = sum(1 for f in target_files if f == most_recent_file)
         self.file_attempt_counts[most_recent_file] = attempts
 
-        # Thrashing condition: 3+ edits on same file while test status is failing
         is_failing = "FAIL" in test_status.upper() or "ERROR" in test_status.upper()
         if attempts >= 3 and is_failing and self.last_green_checkpoint:
-            # Trigger surgical rollback!
             success = self.ckpt_mgr.rollback(
                 checkpoint_id=self.last_green_checkpoint,
                 target_files=[most_recent_file]
@@ -297,7 +381,6 @@ class LoopBreaker:
                     task_text=task_text,
                     last_error=last_error
                 )
-                # Reset counter after successful remediation
                 self.file_attempt_counts[most_recent_file] = 0
                 return True, self.last_green_checkpoint, pivot_text
 

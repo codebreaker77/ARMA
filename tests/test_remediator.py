@@ -180,6 +180,36 @@ class TestRemediator(unittest.TestCase):
         with open(self.file_a, "r", encoding="utf-8") as f:
             self.assertIn("return 42", f.read())
 
+    def test_openhands_exact_loop_detectors(self):
+        # 1. Identical Action-Observation
+        pairs_loop = [("cat file.py", "contents")] * 4
+        self.assertTrue(LoopBreaker.check_identical_action_obs(pairs_loop, threshold=4))
+        self.assertFalse(LoopBreaker.check_identical_action_obs(pairs_loop[:3], threshold=4))
+
+        # 2. Repeated Errors
+        errs = ["ZeroDivisionError: division by zero"] * 3
+        self.assertTrue(LoopBreaker.check_repeated_errors(errs, threshold=3))
+        self.assertFalse(LoopBreaker.check_repeated_errors(errs[:2], threshold=3))
+
+        # 3. Ping-Pong (A -> B -> A -> B for 6 cycles = 12 actions)
+        ping_pong = ["act_A", "act_B"] * 6
+        self.assertTrue(LoopBreaker.check_ping_pong(ping_pong, threshold=6))
+        self.assertFalse(LoopBreaker.check_ping_pong(ping_pong[:10], threshold=6))
+
+        # 4. Monologue (3 assistant messages without tools)
+        monologue = ["ASSISTANT_TEXT: hello", "ASSISTANT_TEXT: thinking...", "ASSISTANT_TEXT: still thinking..."]
+        self.assertTrue(LoopBreaker.check_monologue(monologue, threshold=3))
+        self.assertFalse(LoopBreaker.check_monologue(monologue[:2], threshold=3))
+
+        # 5. Exact loop pivot synthesis
+        pivot = AlternativeStrategySynthesizer.synthesize_exact_loop_pivot(
+            loop_type="Repeated Error",
+            details="ZeroDivisionError occurred 3 times",
+            suggested_action="Change denominator check"
+        )
+        self.assertIn("EXACT LOOP DETECTED - REPEATED ERROR", pivot)
+        self.assertIn("Change denominator check", pivot)
+
 
 if __name__ == "__main__":
     unittest.main()
