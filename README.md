@@ -427,34 +427,66 @@ Testing whether probe accuracy is an artifact of lexical keyword overlap or genu
 2. **Lexical Distractor Vulnerability in Naive LLMs**: Zero-shot prompting on Gemma 3 exhibited strong lexical capture (p = 0.920 on distractors containing the task keyword), confirming that raw LLMs require structured rubric prompting and probe gating rather than naive zero-shot classification.
 3. **Resilient Cloud Gateway Fallback**: Vercel AI Gateway authentication seamlessly handled the gateway response envelope, with transparent fallback to Rung 2 when customer verification is pending.
 
-### Empirical Validation 3: Official SWE-bench Lite Benchmark (`benchmark_swebench_official.py`)
+### Empirical Validation 3: Offline Evaluation on Public SWE-bench Lite Instances (`benchmark_swebench_official.py`)
 
-Evaluating 80 Scope Gate decisions on real GitHub issue problem statements from `django/django` and `astropy/astropy` against true gold maintainer patches vs. repository distractors, plus 40 real `FAIL_TO_PASS` test failure assertions:
+Evaluating Scope Gate file localization on public SWE-bench Lite issue descriptions from `django/django` and `astropy/astropy` against true gold maintainer patches vs. intra-repo distractors:
 
-| Backend Rung | Official AUROC | Mean P(Gold Patch) | Mean P(Distractor) | Prob Spread | Stop Gate Block % | Mean Latency |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Rung 1: EmbedPrior (Zero-Shot Baseline)** | 0.5459 | 0.492 | 0.492 | 0.0177 | 100.0% | 252.7 ms |
-| **Rung 2: SupervisedEmbed (Linear Probe)** | **0.6509** | **0.804** | 0.550 | **0.9786** | 100.0% | 194.1 ms |
-| **Rung 0+2: ClassifierLadder (Rules + Probe)** | **0.6509** | **0.804** | 0.550 | **0.9786** | **100.0%** | 193.9 ms |
+| Backend Rung | AUROC (95% Bootstrap CI) | Mean P(Gold Patch) | Mean P(Distractor) | Prob Spread | Mean Latency |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Rung 1: EmbedPrior (Zero-Shot Baseline)** | 0.5459 [0.442, 0.648] | 0.492 | 0.492 | 0.0177 | 252.7 ms |
+| **Rung 2: SupervisedEmbed (Linear Probe)** | **0.6509 [0.531, 0.770]** | **0.804** | 0.550 | **0.9786** | 194.1 ms |
+| **Rung 0+2: ClassifierLadder (Rules + Probe)** | **0.6509 [0.531, 0.770]** | **0.804** | 0.550 | **0.9786** | 193.9 ms |
 
-### Empirical Validation 4: Official SWE-agent Trajectory Replay (`benchmark_sweagent_trajectories.py`)
+#### Generalization Gap & Caveats:
+1. **The Real Generalization Picture**: Linear probe AUROC drops from **0.9680** on synthetic actions to **0.6509** (95% CI: [0.531, 0.770]) on real SWE-bench Lite issues. EmbedPrior remains at chance level (0.5459).
+2. **Task Formulation Caveat**: File localization from issue text is an information retrieval problem over long natural language descriptions, which carries different structural priors than gating an agent's runtime edit against a task.
+3. **Pre-Fix Test Invariant**: FAIL_TO_PASS assertions fail before the fix by definition; blocking on failing exit codes reflects expected invariant enforcement, not proof that forcing continuation resolves the bug.
 
-Replaying 40 full multi-turn execution trajectories (834 real tool observations, 838 bash commands) from real open-source agent runs (`nebius/SWE-agent-trajectories`):
+---
 
-| Empirical Replay Dimension | Measured Value on Real Official Traces |
+### Empirical Validation 4: Offline Trajectory Replay on Public OpenHands Runs (`benchmark_trajectory_replay.py`)
+
+Replaying 100 historical execution trajectories (Qwen3-Coder-480B with OpenHands from `nebius/SWE-rebench-openhands-trajectories`), stratified into 50 resolved and 50 unresolved runs:
+
+#### 1. Leak-Free Stop Gate Evaluation (Observable Signals Before Submit vs. PR Resolution)
+
+| Stop Gate Metric | Measured Value on Real Public Traces |
 | :--- | :--- |
-| **Total Official Trajectories Replayed** | 40 |
-| **Real Tool Observations Processed** | 834 |
-| **Raw Observation Tokens (Est.)** | 405,044 tokens |
-| **ARMA Pruned Tokens (Est.)** | 142,976 tokens |
-| **Real Token Compression Ratio** | **64.7% reduction** |
-| **Runs Failing from Context Exhaustion (`exit_context`)** | 7 (17.5%) |
-| **Premature Submissions Intercepted (Tests Failing)** | **31** |
-| **Clean Submissions Verified (Tests Passing)** | 9 |
+| **Total Evaluated Trajectories** | 100 (50 resolved, 50 unresolved) |
+| **True Positives (Allowed & PR Resolved)** | 22 |
+| **False Positives (Allowed but PR Unresolved)** | 23 |
+| **True Negatives (Blocked & PR Unresolved)** | 27 |
+| **False Negatives (Blocked but PR Resolved - False Block!)** | 28 |
+| **Precision (P(Resolved \| Allowed))** | 48.9% |
+| **Recall** | 44.0% |
+| **False-Block Rate (FN / Resolved)** | **56.0%** |
+| **Unresolved Interception Rate (TNR)** | 54.0% |
+| **Overall Resolution Classification Accuracy** | 49.0% |
 
-#### Key Insights from Real Agent Trajectories:
-1. **Preventing Context Exhaustion**: 17.5% of official SWE-agent runs died specifically due to `exit_context` (accumulating multi-thousand line file reads and command outputs). ARMA's `ToolOutputPruner` achieved a measured **64.7% token reduction** across 834 real observations, preventing context burnout.
-2. **Stopping Premature Exits**: In 31 out of 40 official runs, agents attempted to submit solutions while test assertions were still red. ARMA's Stop Gate intercepted all 31 premature submissions.
+#### 2. Information Loss Test (Next-Action Identifier Retention Across 6,308 Turns)
+
+| Information Loss Metric | Measured Value |
+| :--- | :--- |
+| **Total Interaction Steps Tested** | 6,308 |
+| **Target Identifiers Present in Raw Observation** | 64,207 |
+| **Target Identifiers Preserved in Pruned Observation** | 49,085 |
+| **Identifier Retention Rate** | **76.45%** |
+| **Information Loss Rate** | 23.55% |
+
+#### 3. Cumulative Token Cost Math (Turn-by-Turn Context Accumulation)
+
+| Cost Metric | Measured Value |
+| :--- | :--- |
+| **Raw Cumulative Input Tokens Processed** | 391,908,309 tokens |
+| **Pruned Cumulative Input Tokens Processed** | 213,415,676 tokens |
+| **Cumulative Input Token Reduction** | **45.54% reduction** |
+| **Cost @ $3.00/M (Zero Cache)** | Raw: $1,175.72 -> Pruned: $640.25 (45.5% cut) |
+| **Cost @ 80% Prompt Cache ($0.30 read / $3.00 write)** | Raw: $329.20 -> Pruned: $179.27 (45.5% cut) |
+
+#### Key Insights from Trajectory Replay:
+1. **The False-Block Reality**: Evaluating Stop Gate strictly on observable test outcomes before submit achieves 49.0% accuracy with a 56.0% False-Block Rate. Local test suites are imperfect proxies for global PR resolution (agents pass local unit tests that miss regressions, or fix bugs without executing the specific unit test).
+2. **Context Economics vs. Overflow**: Modern foundation models operate with 128k-1M token context windows. Pruning's real value is cumulative cost and latency reduction (a measured 45.5% cumulative input token cut), while retaining 76.5% of identifiers referenced in subsequent actions.
+3. **Replay vs. Live A/B**: Offline replays evaluate historical traces. Live execution (e.g. mini-swe-agent on SWE-bench Verified Mini) is required to evaluate whether blocking agents leads to self-healing or unrewarded token expenditure.
 
 ---
 
@@ -471,8 +503,8 @@ ARMA/
 ├── benchmark_phase5_remediation.py# 5-scenario self-healing & remediation benchmark
 ├── benchmark_classifier_ladder.py # 100-scenario backend ladder empirical benchmark
 ├── benchmark_leakage_audit.py     # Adversarial zero-overlap vs. distractor leakage audit
-├── benchmark_swebench_official.py # Official SWE-bench Lite real issue & gold patch benchmark
-├── benchmark_sweagent_trajectories.py # Official SWE-agent real agent trajectory replay benchmark
+├── benchmark_swebench_official.py # Offline SWE-bench Lite real issue & gold patch benchmark
+├── benchmark_trajectory_replay.py # Offline replay on public OpenHands trajectories
 ├── layer/                         # Core ARMA runtime
 │   ├── __init__.py                # Package initialization
 │   ├── evidence_db.py             # SQLite Evidence Plane implementation

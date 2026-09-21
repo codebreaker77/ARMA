@@ -285,41 +285,78 @@ def run_official_swebench_benchmark(num_instances: int = 40):
         mean_neg = float(np.mean(neg_probs))
         spread = max(pos_probs + neg_probs) - min(pos_probs + neg_probs)
         mean_lat = float(np.mean(latencies))
-        stop_block_rate = (stop_blocked / max(len(stop_gate_scenarios), 1)) * 100.0
+
+        # Bootstrap 95% Confidence Interval (1000 resamples)
+        np.random.seed(42)
+        n_pos, n_neg = len(pos_probs), len(neg_probs)
+        boot_aurocs = []
+        for _ in range(1000):
+            b_pos = [pos_probs[i] for i in np.random.choice(n_pos, size=n_pos, replace=True)]
+            b_neg = [neg_probs[j] for j in np.random.choice(n_neg, size=n_neg, replace=True)]
+            boot_aurocs.append(compute_auroc(b_pos, b_neg))
+        ci_low = float(np.percentile(boot_aurocs, 2.5))
+        ci_high = float(np.percentile(boot_aurocs, 97.5))
 
         results.append([
             name,
-            f"{auroc:.4f}",
+            f"{auroc:.4f} [{ci_low:.3f}, {ci_high:.3f}]",
             f"{mean_pos:.3f}",
             f"{mean_neg:.3f}",
             f"{spread:.4f}",
-            f"{stop_block_rate:.1f}%",
             f"{mean_lat:.1f} ms"
         ])
 
     headers = [
         "Backend Rung",
-        "Official AUROC",
+        "AUROC (95% Bootstrap CI)",
         "Mean P(Gold Patch)",
         "Mean P(Distractor)",
         "Prob Spread",
-        "Stop Gate Block %",
         "Mean Latency"
     ]
     print(format_table(headers, results))
 
+    # Per-repository breakdown for Rung 2
+    print("\n--- Per-Repository Generalization Breakdown (Rung 2 Supervised Probe) ---")
+    repos = sorted(set(sc["repo"] for sc in scenarios))
+    r2_backend = rungs[1][1]
+    repo_results = []
+    for r_name in repos:
+        r_scenarios = [sc for sc in scenarios if sc["repo"] == r_name]
+        r_pos = []
+        r_neg = []
+        for sc in r_scenarios:
+            st = {"task": sc["task"], "target": sc["target"], "action": sc["action"]}
+            try:
+                p = r2_backend.evaluate(st, q_scope).answers["is_file_in_scope"].probability
+            except Exception:
+                p = 0.5
+            if sc["label"] == 1:
+                r_pos.append(p)
+            else:
+                r_neg.append(p)
+        r_auroc = compute_auroc(r_pos, r_neg)
+        repo_results.append([
+            r_name,
+            str(len(r_pos)),
+            f"{r_auroc:.4f}",
+            f"{np.mean(r_pos):.3f}",
+            f"{np.mean(r_neg):.3f}"
+        ])
+    print(format_table(["Repository", "Sample Count", "Repo AUROC", "Mean P(Gold)", "Mean P(Distractor)"], repo_results))
+
     print("\n" + "=" * 90)
-    print("OFFICIAL SWE-BENCH LITE BENCHMARK FINDINGS:")
+    print("EMPIRICAL FINDINGS & GENERALIZATION ANALYSIS:")
     print("=" * 90)
-    print("1. Real GitHub Issues & Maintainer Diffs:")
-    print("   - ARMA was evaluated against genuine maintainer patches across major Python repositories.")
-    print("   - Rung 2 (Supervised Linear Probe) achieves high discriminative AUROC separating gold patch files")
-    print("     from docs, CI configs, and out-of-scope sibling modules.")
-    print("2. Stop Gate Invariant Verification:")
-    print("   - Rung 0 deterministic rules achieved 100% interception of real FAIL_TO_PASS assertions,")
-    print("     guaranteeing that premature completion cannot occur when official tests are red.")
-    print("3. Zero-Cost, Fast Execution:")
-    print(f"   - Completed all {len(scenarios)} evaluations in seconds on local CPU hardware without paid APIs.")
+    print("1. The Real Generalization Gap:")
+    print("   - Probe AUROC drops from 0.9680 on synthetic data to 0.65-0.67 on public SWE-bench Lite data.")
+    print("   - EmbedPrior collapses to chance (0.5459), confirming that zero-shot cosine heuristics carry no signal.")
+    print("2. Task Formulation Caveat:")
+    print("   - This evaluation measures file localization from issue descriptions (an IR retrieval problem).")
+    print("   - This differs from runtime action gating (evaluating a concrete diff/command against current state).")
+    print("3. Pre-Fix Test Caveat:")
+    print("   - FAIL_TO_PASS tests fail before the fix by definition; blocking on failing exit codes is expected,")
+    print("     not empirical evidence that continuing execution leads to a verified fix.")
     print("=" * 90)
 
 
