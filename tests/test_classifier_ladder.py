@@ -3,10 +3,13 @@ Unit tests for ARMA Classifier Backend Ladder (layer/classifier_ladder.py).
 """
 
 import unittest
+from unittest.mock import patch, MagicMock
 from layer.embed_prior import Noul, Choice, Score, EmbedPrior
 from layer.classifier_ladder import (
     RuleClassifier,
     SupervisedEmbedClassifier,
+    LLMLogitClassifier,
+    VercelAIGatewayClassifier,
     ClassifierLadder
 )
 
@@ -93,6 +96,45 @@ class TestClassifierLadder(unittest.TestCase):
         )
         self.assertEqual(fuzzy_res.answers["is_file_in_scope"].status, "ok")
         self.assertGreater(fuzzy_res.answers["is_file_in_scope"].probability, 0.60)
+
+    def test_llm_logit_classifier_fallback(self):
+        # Unreachable port triggers graceful fallback to supervised embed probe
+        clf = LLMLogitClassifier(ollama_url="http://localhost:59998", timeout=0.2)
+        task = "Fix syntax error in parser"
+        state = {"task": task, "target": "src/parser.py"}
+        q = {"is_file_in_scope": Noul("The edit is needed for the stated task")}
+        res = clf.evaluate(state, q)
+        self.assertIn("is_file_in_scope", res.answers)
+        self.assertGreater(res.answers["is_file_in_scope"].probability, 0.50)
+
+    def test_vercel_ai_gateway_fallback(self):
+        # When gateway key is absent or invalid, fallback executes safely
+        clf = VercelAIGatewayClassifier(api_key="invalid_test_key", base_url="https://invalid.test.url", timeout=0.2)
+        task = "Fix syntax error in parser"
+        state = {"task": task, "target": "src/parser.py"}
+        q = {"is_file_in_scope": Noul("The edit is needed for the stated task")}
+        res = clf.evaluate(state, q)
+        self.assertIn("is_file_in_scope", res.answers)
+        self.assertGreater(res.answers["is_file_in_scope"].probability, 0.50)
+
+    def test_vercel_ai_gateway_mock_response(self):
+        clf = VercelAIGatewayClassifier(api_key="mock_key", timeout=1.0)
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "choices": [{
+                "message": {
+                    "content": '{"is_file_in_scope": "YES"}'
+                }
+            }]
+        }
+        with patch.object(clf.session, "post", return_value=mock_resp):
+            state = {"task": "Add CORS support", "target": "src/api/cors.py"}
+            q = {"is_file_in_scope": Noul("Is file in scope")}
+            res = clf.evaluate(state, q)
+            self.assertEqual(res.answers["is_file_in_scope"].status, "ai_gateway")
+            self.assertEqual(res.answers["is_file_in_scope"].boolean_value, True)
+            self.assertGreaterEqual(res.answers["is_file_in_scope"].probability, 0.90)
 
 
 if __name__ == "__main__":

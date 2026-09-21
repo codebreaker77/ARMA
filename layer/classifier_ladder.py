@@ -431,6 +431,131 @@ class LLMLogitClassifier(BaseClassifierBackend):
 
 
 # ---------------------------------------------------------------------------
+# Rung 4: Vercel AI Gateway (Cloud Foundation Models)
+# ---------------------------------------------------------------------------
+
+class VercelAIGatewayClassifier(BaseClassifierBackend):
+    """
+    Rung 4: Evaluates decisions through Vercel AI Gateway (https://ai-gateway.vercel.sh/v1).
+    Accesses foundation models (Google Gemini 2.5, OpenAI, Anthropic, Meta Llama).
+    API key is read from environment variable AI_GATEWAY_API_KEY (never in the repo).
+    Falls back gracefully to Rung 2/3 if unconfigured, rate limited, or customer verification required.
+    """
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        base_url: str = "https://ai-gateway.vercel.sh/v1",
+        model: str = "google/gemini-2.5-flash",
+        timeout: float = 6.0
+    ):
+        self.base_url = base_url
+        self.model = os.environ.get("AI_GATEWAY_MODEL", model)
+        self.timeout = timeout
+        self.session = requests.Session()
+        self.fallback = SupervisedEmbedClassifier()
+
+        # Securely read key from environment or .env file (never in the repo)
+        self.api_key = api_key or os.environ.get("AI_GATEWAY_API_KEY") or os.environ.get("VERCEL_AI_GATEWAY_API_KEY")
+        if not self.api_key:
+            self._load_key_from_env_file()
+
+    def _load_key_from_env_file(self):
+        """Attempts to read from local .env if present."""
+        env_path = os.path.join(os.getcwd(), ".env")
+        if os.path.isfile(env_path):
+            try:
+                with open(env_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            k, v = line.split("=", 1)
+                            if k.strip() in ("AI_GATEWAY_API_KEY", "VERCEL_AI_GATEWAY_API_KEY"):
+                                self.api_key = v.strip().strip("'\"")
+                                break
+            except Exception:
+                pass
+
+    def evaluate(
+        self,
+        state: Dict[str, Any],
+        questions: Dict[str, Union[Noul, Choice, Score]]
+    ) -> EmbedPriorResponse:
+        t0 = time.time()
+        if not self.api_key:
+            return self.fallback.evaluate(state, questions)
+
+        prompt = (
+            "You are a strict code intelligence decision classifier.\n"
+            f"Context:\n{str(state)[:1000]}\n\n"
+            "Questions to evaluate:\n"
+        )
+        for q_name, q_obj in questions.items():
+            if isinstance(q_obj, Noul):
+                prompt += f"- {q_name}: {q_obj.instructions} (Answer YES or NO)\n"
+            elif isinstance(q_obj, Choice):
+                prompt += f"- {q_name}: Select exactly one of {list(q_obj.criteria.keys())}\n"
+
+        prompt += "\nOutput in JSON format with keys matching question names."
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.0
+        }
+
+        try:
+            resp = self.session.post(
+                f"{self.base_url}/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=self.timeout
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                raw_content = data["choices"][0]["message"]["content"]
+                clean_json = raw_content
+                if "```json" in clean_json:
+                    clean_json = clean_json.split("```json")[1].split("```")[0].strip()
+                elif "```" in clean_json:
+                    clean_json = clean_json.split("```")[1].split("```")[0].strip()
+
+                parsed = json.loads(clean_json)
+                answers = {}
+                for q_name, q_obj in questions.items():
+                    val = parsed.get(q_name)
+                    if isinstance(q_obj, Noul):
+                        is_yes = str(val).strip().upper() in ("YES", "TRUE", "1")
+                        p = 0.95 if is_yes else 0.05
+                        answers[q_name] = NoulResult(
+                            probability=p,
+                            boolean_value=is_yes,
+                            confidence=0.90,
+                            status="ai_gateway"
+                        )
+                    elif isinstance(q_obj, Choice):
+                        opts = list(q_obj.criteria.keys())
+                        chosen = str(val) if str(val) in opts else opts[0]
+                        answers[q_name] = ChoiceResult(
+                            selected_option=chosen,
+                            distribution={o: (0.90 if o == chosen else 0.05) for o in opts},
+                            confidence=0.90,
+                            status="ai_gateway"
+                        )
+                if answers:
+                    return EmbedPriorResponse(answers=answers, latency_ms=(time.time() - t0) * 1000.0)
+        except Exception:
+            pass
+
+        # Graceful fallback to Rung 2
+        return self.fallback.evaluate(state, questions)
+
+
+# ---------------------------------------------------------------------------
 # Classifier Ladder Coordinator
 # ---------------------------------------------------------------------------
 
