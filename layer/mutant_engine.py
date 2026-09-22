@@ -21,6 +21,7 @@ class CodeMutant:
     original_code: str
     mutated_code: str
     description: str
+    mutated_snippet: str = ""
 
 
 class AstMutator(ast.NodeTransformer):
@@ -216,8 +217,9 @@ class MutantEngine:
                     file_path=file_path,
                     line_number=line_no,
                     original_code=orig_snippet,
-                    mutated_code=mut_snippet,
-                    description=f"{m_type} at {file_path}:{line_no} ('{orig_snippet}' -> '{mut_snippet}')"
+                    mutated_code=mutated_source,
+                    description=f"{m_type} at {file_path}:{line_no} ('{orig_snippet}' -> '{mut_snippet}')",
+                    mutated_snippet=mut_snippet,
                 ))
             except Exception:
                 continue

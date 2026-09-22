@@ -72,7 +72,8 @@ class ArmaHooks:
         self,
         session_id: str,
         test_results: Optional[Dict[str, Any]] = None,
-        diff_stat: Optional[str] = None
+        diff_stat: Optional[str] = None,
+        patch_text: Optional[str] = None
     ) -> DecisionGateResult:
         """
         Called when the agent attempts to stop or declare task completion.
@@ -82,11 +83,28 @@ class ArmaHooks:
         turn = sess.get("turn", 0) + 1
         sess["turn"] = turn
 
+        # Auto-extract patch_text from working directory if not supplied
+        if patch_text is None:
+            repo_p = sess.get("repo_path", ".")
+            try:
+                import subprocess
+                diff_proc = subprocess.run(
+                    ["git", "diff", "HEAD"],
+                    cwd=repo_p,
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if diff_proc.returncode == 0 and diff_proc.stdout.strip():
+                    patch_text = diff_proc.stdout
+            except Exception:
+                pass
+
         event_id = self.db.record_event(
             session_id=session_id,
             turn=turn,
             kind="stop_requested",
-            raw_payload_summary=f"Tests: {bool(test_results)}, Diff: {diff_stat}"
+            raw_payload_summary=f"Tests: {bool(test_results)}, Diff: {diff_stat}, PatchLen: {len(patch_text) if patch_text else 0}"
         )
 
         return self.engine.evaluate_stop(
@@ -94,7 +112,8 @@ class ArmaHooks:
             event_id=event_id,
             task_text=sess.get("task_text", "Unknown Task"),
             test_results=test_results,
-            diff_stat=diff_stat
+            diff_stat=diff_stat,
+            patch_text=patch_text
         )
 
     def on_pre_tool_use(

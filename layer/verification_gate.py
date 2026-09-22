@@ -11,6 +11,7 @@ Interrogates agent proof before approving completion:
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional, Callable
 import os
+import subprocess
 
 from layer.test_diff_interrogator import TestDiffInterrogator, InterrogationReport
 from layer.mutant_engine import MutantEngine, CodeMutant
@@ -145,3 +146,188 @@ class VerificationAdequacyGate:
             interrogation_report=report,
             mutation_result=mutation_result,
         )
+
+    def verify_repository(
+        self,
+        repo_path: str,
+        patch_text: str,
+        test_command: Optional[str] = None,
+        timeout_seconds: int = 20,
+    ) -> VerificationOutcome:
+        """
+        Verify verification adequacy directly against a local repository on disk.
+
+        1. Runs test-diff interrogation on patch_text to catch assertion deletions,
+           swallowed exceptions, or injected skips.
+        2. If test_command is supplied, generates targeted AST mutants on modified lines,
+           safely swaps mutated code in-place with guaranteed restoration in a try...finally block,
+           and runs test_command to compute the empirical mutation kill ratio.
+        """
+        # Step 1: Interrogate Diff
+        report = self.interrogator.interrogate_diff(patch_text)
+        if report.has_critical_weakening:
+            reasons = [f"{v.violation_type}: {v.snippet}" for v in report.violations[:3]]
+            return VerificationOutcome(
+                allow=False,
+                stage="test_diff_audit",
+                reason=f"Test weakening detected: {'; '.join(reasons)}",
+                interrogation_report=report,
+            )
+
+        if not test_command:
+            return VerificationOutcome(
+                allow=True,
+                stage="verified",
+                reason="Verification Adequate: Zero test-weakening detected (no mutation test command specified).",
+                interrogation_report=report,
+            )
+
+        # Step 2: Read source files modified in patch_text from disk
+        modified_lines_map = self.mutant_engine.extract_modified_lines_by_file(patch_text)
+        all_mutants: List[CodeMutant] = []
+        original_contents: Dict[str, str] = {}
+
+        for rel_path, mod_lines in modified_lines_map.items():
+            full_path = os.path.join(repo_path, rel_path)
+            if not os.path.exists(full_path) or not os.path.isfile(full_path):
+                continue
+            try:
+                with open(full_path, "r", encoding="utf-8") as f:
+                    src = f.read()
+                original_contents[rel_path] = src
+                muts = self.mutant_engine.generate_mutants_for_source(src, rel_path, target_lines=mod_lines)
+                all_mutants.extend(muts)
+            except Exception:
+                continue
+
+        if not all_mutants:
+            return VerificationOutcome(
+                allow=True,
+                stage="verified",
+                reason="Verification Adequate: Zero test-weakening detected and no targetable implementation mutants generated.",
+                interrogation_report=report,
+            )
+
+        # Step 3: Configure test execution environment
+        env = os.environ.copy()
+        env["PYTHONPATH"] = f"{repo_path}{os.pathsep}{env.get('PYTHONPATH', '')}"
+
+        # Baseline check: Tests MUST pass on unmutated code first
+        try:
+            base_res = subprocess.run(
+                test_command,
+                shell=True,
+                cwd=repo_path,
+                capture_output=True,
+                timeout=timeout_seconds,
+                text=True,
+                env=env,
+            )
+            if base_res.returncode != 0:
+                return VerificationOutcome(
+                    allow=False,
+                    stage="mutation_probe",
+                    reason=f"Baseline tests failed on unmutated code with exit code {base_res.returncode}. Tests must pass before mutation probes can evaluate adequacy.",
+                    interrogation_report=report,
+                )
+        except subprocess.TimeoutExpired:
+            return VerificationOutcome(
+                allow=False,
+                stage="mutation_probe",
+                reason="Baseline test run timed out on unmutated code.",
+                interrogation_report=report,
+            )
+        except Exception as e:
+            return VerificationOutcome(
+                allow=False,
+                stage="mutation_probe",
+                reason=f"Failed to execute baseline tests: {str(e)}",
+                interrogation_report=report,
+            )
+
+        # Step 4: Run mutation probes
+        mutants_eval = []
+        killed_count = 0
+
+        for m in all_mutants[:self.mutant_engine.max_mutants_budget]:
+            target_full_path = os.path.join(repo_path, m.file_path)
+            orig_src = original_contents.get(m.file_path)
+            if not orig_src:
+                continue
+
+            is_killed = False
+            kill_reason = "tests_failed"
+            try:
+                # Safely swap in mutated source
+                with open(target_full_path, "w", encoding="utf-8") as f:
+                    f.write(m.mutated_code)
+
+                # Run test command against mutant
+                res = subprocess.run(
+                    test_command,
+                    shell=True,
+                    cwd=repo_path,
+                    capture_output=True,
+                    timeout=timeout_seconds,
+                    text=True,
+                    env=env,
+                )
+                if res.returncode != 0:
+                    is_killed = True
+            except subprocess.TimeoutExpired:
+                is_killed = True
+                kill_reason = "timeout"
+            except Exception as e:
+                is_killed = True
+                kill_reason = f"error: {str(e)}"
+            finally:
+                # Guaranteed restoration of original code
+                with open(target_full_path, "w", encoding="utf-8") as f:
+                    f.write(orig_src)
+
+            if is_killed:
+                killed_count += 1
+
+            mutants_eval.append({
+                "mutant_id": m.mutant_id,
+                "description": m.description,
+                "killed": is_killed,
+                "kill_reason": kill_reason if is_killed else "survived",
+            })
+
+        total_m = len(mutants_eval)
+        kill_ratio = killed_count / total_m if total_m > 0 else 1.0
+        adequacy_passed = (kill_ratio >= self.min_mutation_kill_ratio)
+
+        mutation_result = MutationProbeResult(
+            total_mutants=total_m,
+            mutants_killed=killed_count,
+            mutants_survived=total_m - killed_count,
+            kill_ratio=kill_ratio,
+            mutants=mutants_eval,
+            adequacy_passed=adequacy_passed,
+            summary=f"Mutation Kill Ratio: {kill_ratio*100:.1f}% ({killed_count}/{total_m} mutants killed).",
+        )
+
+        if not adequacy_passed:
+            survived_descriptions = [m["description"] for m in mutants_eval if not m["killed"]][:2]
+            return VerificationOutcome(
+                allow=False,
+                stage="mutation_probe",
+                reason=(
+                    f"Verification Inadequate: Only {kill_ratio*100:.0f}% of implementation mutants were killed by tests "
+                    f"(threshold: {self.min_mutation_kill_ratio*100:.0f}%). "
+                    f"Tests passed even when logic was mutated: {'; '.join(survived_descriptions)}"
+                ),
+                interrogation_report=report,
+                mutation_result=mutation_result,
+            )
+
+        return VerificationOutcome(
+            allow=True,
+            stage="verified",
+            reason=f"Verification Adequate: Zero test-weakening detected and {kill_ratio*100:.0f}% mutants killed ({killed_count}/{total_m}).",
+            interrogation_report=report,
+            mutation_result=mutation_result,
+        )
+

@@ -262,6 +262,91 @@ def cmd_rollback(args):
         sys.exit(1)
 
 
+def cmd_verify(args):
+    """Interrogate test diffs and run targeted mutation probes to verify test adequacy."""
+    import subprocess
+    import os
+    from layer.verification_gate import VerificationAdequacyGate
+
+    repo_path = os.path.abspath(args.repo or os.getcwd())
+    diff = args.diff
+
+    if not diff:
+        try:
+            diff_proc = subprocess.run(
+                ["git", "diff", "HEAD"],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if diff_proc.returncode == 0:
+                diff = diff_proc.stdout
+            else:
+                print(f"Error reading git diff: {diff_proc.stderr}")
+                sys.exit(1)
+        except Exception as e:
+            print(f"Error invoking git: {e}")
+            sys.exit(1)
+
+    if not diff or not diff.strip():
+        print("No modifications detected in working directory.")
+        return
+
+    gate = VerificationAdequacyGate(
+        min_mutation_kill_ratio=args.threshold,
+        mutant_budget=args.mutants
+    )
+
+    print("=" * 65)
+    print("ARMA Verification Adequacy Gate")
+    print("=" * 65)
+    print(f"Repository Path   : {repo_path}")
+    print(f"Test Command      : {args.test_cmd or 'None (Diff Audit Only)'}")
+    print(f"Mutant Budget     : {args.mutants}")
+    print(f"Kill Ratio Target : {args.threshold * 100:.0f}%")
+    print("-" * 65)
+
+    outcome = gate.verify_repository(
+        repo_path=repo_path,
+        patch_text=diff,
+        test_command=args.test_cmd
+    )
+
+    if outcome.interrogation_report:
+        rep = outcome.interrogation_report
+        print(f"Diff Audit        : {'PASSED' if rep.is_adequate else 'FAILED'}")
+        print(f"  Test Files Touched : {len(rep.test_files_touched)}")
+        print(f"  Impl Files Touched : {len(rep.impl_files_touched)}")
+        print(f"  New Tests Added    : {rep.new_tests_count}")
+        if rep.has_critical_weakening:
+            print(f"  Critical Violations: {len(rep.violations)}")
+            for v in rep.violations:
+                print(f"    - [{v.violation_type}] {v.file_path}:{v.line_number or '?'} -> {v.snippet}")
+
+    if outcome.mutation_result:
+        m_res = outcome.mutation_result
+        print(f"Mutation Probes   : {'PASSED' if m_res.adequacy_passed else 'FAILED'}")
+        print(f"  Total Mutants   : {m_res.total_mutants}")
+        print(f"  Mutants Killed  : {m_res.mutants_killed}")
+        print(f"  Mutants Survived: {m_res.mutants_survived}")
+        print(f"  Kill Ratio      : {m_res.kill_ratio * 100:.1f}%")
+        if m_res.mutants_survived > 0:
+            print("  Surviving Mutants (Tests Failed to Catch):")
+            for m in m_res.mutants:
+                if not m["killed"]:
+                    print(f"    - {m['description']}")
+
+    print("=" * 65)
+    if outcome.allow:
+        print("[SUCCESS] Verification Adequate. All requirements satisfied.")
+        print("=" * 65)
+    else:
+        print(f"[BLOCKED] Verification Inadequate: {outcome.reason}")
+        print("=" * 65)
+        sys.exit(1)
+
+
 def main():
     parser = argparse.ArgumentParser(prog="arma", description="ARMA Layer CLI")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
@@ -325,6 +410,15 @@ def main():
     p_roll.add_argument("-s", "--session", type=str, default=None, help="Session ID (used if checkpoint not specified)")
     p_roll.add_argument("-f", "--files", type=str, default=None, help="Comma-separated files to restore (default: all snapshot files)")
     p_roll.set_defaults(func=cmd_rollback)
+
+    # verify
+    p_ver = subparsers.add_parser("verify", help="Audit test diffs and run mutation probes")
+    p_ver.add_argument("-t", "--test-cmd", type=str, default=None, help="Test command to run (e.g. 'pytest tests/')")
+    p_ver.add_argument("-d", "--diff", type=str, default=None, help="Explicit unified git diff string")
+    p_ver.add_argument("-r", "--repo", type=str, default=None, help="Repository root path")
+    p_ver.add_argument("-m", "--mutants", type=int, default=5, help="Maximum mutants budget (default 5)")
+    p_ver.add_argument("--threshold", type=float, default=0.50, help="Minimum mutation kill ratio (default 0.50)")
+    p_ver.set_defaults(func=cmd_verify)
 
     args = parser.parse_args()
     if not hasattr(args, "func"):

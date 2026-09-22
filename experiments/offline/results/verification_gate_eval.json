@@ -1,0 +1,101 @@
+{
+  "dataset_sample_size": 2000,
+  "n_patches": 1998,
+  "prevalence": {
+    "touches_test_files_count": 927,
+    "touches_test_files_pct": 46.35,
+    "critical_weakening_count": 30,
+    "critical_weakening_pct": 1.5,
+    "deleted_assertions_count": 24,
+    "weakened_assertions_count": 0,
+    "injected_skips_count": 0,
+    "swallowed_exceptions_count": 7,
+    "deleted_tests_count": 1,
+    "new_tests_added_count": 808
+  },
+  "resolution_rates": {
+    "overall": {
+      "mean": 0.4835,
+      "ci": [
+        0.4534789169561271,
+        0.5135625604643663
+      ],
+      "n": 2000
+    },
+    "no_test_modifications": {
+      "mean": 0.4930102516309413,
+      "ci": [
+        0.457917156436858,
+        0.5279412581591482
+      ],
+      "n": 1073
+    },
+    "touches_tests": {
+      "mean": 0.47249190938511326,
+      "ci": [
+        0.43416304234037895,
+        0.5155142048992226
+      ],
+      "n": 927
+    },
+    "tampered_or_weakened": {
+      "mean": 0.4,
+      "ci": [
+        0.21863839285714287,
+        0.6
+      ],
+      "n": 30,
+      "failure_rate": 60.0
+    },
+    "clean_test_additions": {
+      "mean": 0.47491638795986624,
+      "ci": [
+        0.4346551597618249,
+        0.5178003865564266
+      ],
+      "n": 897
+    }
+  },
+  "breakdown": {
+    "deleted_assertions": {
+      "count": 24,
+      "mean": 0.4166666666666667,
+      "ci": [
+        0.21413690476190475,
+        0.625
+      ]
+    },
+    "weakened_assertions": {
+      "count": 0,
+      "mean": 0.0,
+      "ci": [
+        0.0,
+        0.0
+      ]
+    },
+    "injected_skips": {
+      "count": 0,
+      "mean": 0.0,
+      "ci": [
+        0.0,
+        0.0
+      ]
+    },
+    "swallowed_exceptions": {
+      "count": 7,
+      "mean": 0.2857142857142857,
+      "ci": [
+        0.0,
+        0.5749999999999967
+      ]
+    },
+    "deleted_tests": {
+      "count": 1,
+      "mean": 0.0,
+      "ci": [
+        0.0,
+        0.0
+      ]
+    }
+  }
+}
