@@ -11,6 +11,7 @@ Enables Claude Desktop, Cursor, and Windsurf to natively invoke ARMA metacogniti
 import sys
 import json
 import os
+import subprocess
 from typing import Dict, Any, List, Optional
 
 from layer.evidence_db import EvidenceDB
@@ -135,7 +136,8 @@ class MCPServer:
                         "task_text": {"type": "string", "description": "The user's original task description"},
                         "test_exit_code": {"type": "integer", "description": "Exit code of the test command (0 for pass)"},
                         "test_output": {"type": "string", "description": "Terminal output or summary from test runner"},
-                        "diff_stat": {"type": "string", "description": "Git diffstat summary of modifications made"}
+                        "diff_stat": {"type": "string", "description": "Git diffstat summary of modifications made"},
+                        "patch_text": {"type": "string", "description": "Unified git diff of changes (audited for verification adequacy and test-weakening)"}
                     },
                     "required": ["task_text"]
                 }
@@ -206,12 +208,22 @@ class MCPServer:
                         "exit_code": args.get("test_exit_code"),
                         "output": args.get("test_output", "")
                     }
+                patch = args.get("patch_text")
+                if not patch:
+                    try:
+                        proc = subprocess.run(["git", "diff", "HEAD"], capture_output=True, text=True, timeout=5)
+                        if proc.returncode == 0 and proc.stdout.strip():
+                            patch = proc.stdout
+                    except Exception:
+                        pass
+
                 result = self.engine.evaluate_stop(
                     session_id=sess_id,
                     event_id=event_id,
                     task_text=args.get("task_text", ""),
                     test_results=test_res,
-                    diff_stat=args.get("diff_stat")
+                    diff_stat=args.get("diff_stat"),
+                    patch_text=patch
                 )
                 output_payload = {
                     "allow_completion": result.allow,

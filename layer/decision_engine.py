@@ -14,6 +14,7 @@ from layer.evidence_db import EvidenceDB
 from layer.promotion_ladder import PromotionLadder
 from layer.gate_specs import StopGateSpec, ScopeGateSpec, RiskGateSpec, LoopDetectorSpec
 from layer.calibrator import CalibrationStore, TemperatureScaler
+from layer.verification_gate import VerificationAdequacyGate, VerificationOutcome
 
 
 
@@ -94,6 +95,7 @@ class DecisionEngine:
         self.calibration_path = calibration_path
         self.calibration = CalibrationStore.load(self.calibration_path)
         self.loop_breaker = loop_breaker
+        self.verification_gate = VerificationAdequacyGate()
         for mod in ("stop_gate", "scope_gate", "risk_gate", "loop_detector"):
             self.ladder.set_mode(mod, default_mode)
 
@@ -134,15 +136,17 @@ class DecisionEngine:
         task_text: str,
         test_results: Optional[Dict[str, Any]] = None,
         diff_stat: Optional[str] = None,
+        patch_text: Optional[str] = None,
         checklist_status: Optional[str] = None
     ) -> DecisionGateResult:
         """
         Stop Gate: Evaluates whether the agent should be allowed to exit.
-        Prevents premature exits when tests are failing or tasks remain incomplete.
+        Prevents premature exits when tests are failing, tasks remain incomplete,
+        or tests have been compromised/weakened.
         """
         mode = self.module_modes["stop_gate"]
 
-        # 1. Deterministic Check: If test suite failed with non-zero exit code
+        # 1. Deterministic Check A: If test suite failed with non-zero exit code
         if test_results and test_results.get("exit_code", 0) != 0:
             reason = f"Deterministic Block: Test suite failed with exit code {test_results['exit_code']}."
             action_taken = "pass" if mode == "shadow" else "block"
@@ -173,6 +177,40 @@ class DecisionEngine:
                 probability=0.0,
                 decision_id=dec_id
             )
+
+        # 1b. Deterministic Check B: Verification Adequacy (Test-Diff Interrogation)
+        if patch_text:
+            v_outcome = self.verification_gate.verify(patch_text=patch_text)
+            if not v_outcome.allow:
+                reason = f"Deterministic Block (Verification Adequacy): {v_outcome.reason}"
+                action_taken = "pass" if mode == "shadow" else "block"
+                counterfactual = "block"
+                dec_id = self.db.record_decision(
+                    event_id=event_id,
+                    module="stop_gate",
+                    question_type="deterministic",
+                    question_text="verification_adequacy",
+                    answer_raw="FAILED",
+                    probability=0.0,
+                    confidence=1.0,
+                    backend="deterministic_rule",
+                    model_version="1.0",
+                    threshold=0.5,
+                    mode=mode,
+                    action_taken=action_taken,
+                    counterfactual_action=counterfactual
+                )
+                return DecisionGateResult(
+                    module="stop_gate",
+                    allow=(action_taken == "pass"),
+                    mode=mode,
+                    action_taken=action_taken,
+                    counterfactual_action=counterfactual,
+                    reason=reason,
+                    confidence=1.0,
+                    probability=0.0,
+                    decision_id=dec_id
+                )
 
 
         # 2. Classifier Evaluation on the Fuzzy Middle

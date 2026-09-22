@@ -1,0 +1,36 @@
+{
+  "total_patches": 1998,
+  "test_modifying_patches": 927,
+  "clean_test_patches": 897,
+  "violated_test_patches": 30,
+  "clean_resolution_rate": 0.47491638795986624,
+  "violation_counts": {
+    "ASSERTION_DELETED": 48,
+    "ASSERTION_WEAKENED": 0,
+    "SKIP_INJECTED": 0,
+    "EXCEPTION_SWALLOWED": 18,
+    "TEST_DELETED": 1
+  },
+  "violation_resolved_map": {
+    "ASSERTION_DELETED": {
+      "resolved": 15,
+      "unresolved": 33
+    },
+    "ASSERTION_WEAKENED": {
+      "resolved": 0,
+      "unresolved": 0
+    },
+    "SKIP_INJECTED": {
+      "resolved": 0,
+      "unresolved": 0
+    },
+    "EXCEPTION_SWALLOWED": {
+      "resolved": 2,
+      "unresolved": 16
+    },
+    "TEST_DELETED": {
+      "resolved": 0,
+      "unresolved": 1
+    }
+  }
+}
