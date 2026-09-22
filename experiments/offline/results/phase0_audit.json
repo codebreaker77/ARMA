@@ -1,0 +1,38 @@
+{
+  "dataset_name": "nebius/SWE-rebench-openhands-trajectories",
+  "dataset_revision": "35455389ab51bf5e2306bfd436ef72d0f98bf882",
+  "sample_n": 2000,
+  "total_repos": 1016,
+  "resolved_ratio": 0.4835,
+  "resolved_ratio_95ci": [
+    0.4534789169561271,
+    0.5135625604643663
+  ],
+  "split_sizes": {
+    "dev_trajectories": 1432,
+    "dev_fraction": 0.716,
+    "dev_repos": 714,
+    "dev_resolved_ratio": 0.47416201117318435,
+    "test_trajectories": 568,
+    "test_fraction": 0.284,
+    "test_repos": 302,
+    "test_resolved_ratio": 0.5070422535211268
+  },
+  "step_distribution": {
+    "mean": 128.3525,
+    "median": 121.0,
+    "p25": 99.0,
+    "p75": 151.0,
+    "min": 55,
+    "max": 201
+  },
+  "token_distribution_estimate": {
+    "proxy": "tiktoken_cl100k_base",
+    "mean": 35974.7975,
+    "median": 34030.0,
+    "p25": 27312.75,
+    "p75": 42008.0,
+    "total_tokens": 71949595
+  },
+  "compute_time_seconds": 59.52974820137024
+}

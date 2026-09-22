@@ -1,0 +1,115 @@
+{
+  "split": "test",
+  "n_trajectories": 568,
+  "n_repos": 302,
+  "e1_loop_census": {
+    "pct_trajectories_with_any_loop": 0.670774647887324,
+    "pct_trajectories_with_any_loop_95ci": [
+      0.6194097132229592,
+      0.7193674216426447
+    ],
+    "pct_steps_inside_loops_resolved": 0.47294075575157946,
+    "pct_steps_inside_loops_unresolved": 0.5367370007535796,
+    "pct_tokens_inside_loops_resolved": 0.3559470779215351,
+    "pct_tokens_inside_loops_unresolved": 0.4161716070855701,
+    "pct_tokens_inside_loops_unresolved_95ci": [
+      0.3676321903998071,
+      0.4617234538915926
+    ],
+    "recovery_rate_k5": 0.5144356955380578,
+    "resolution_rate_given_loop": 0.4776902887139108,
+    "cut_policy_simulation": {
+      "grace_0": {
+        "grace": 0,
+        "tokens_saved": 7836726,
+        "pct_tokens_saved": 0.3876599808770148,
+        "wrongly_cut_resolved": 182,
+        "pct_wrongly_cut_resolved": 0.6319444444444444,
+        "effective_resolved": 106,
+        "cost_per_resolved_task_tokens": 116780.53773584905,
+        "baseline_cost_per_resolved": 70192.57986111111,
+        "cost_reduction_ratio": 1.6637162783718844
+      },
+      "grace_3": {
+        "grace": 3,
+        "tokens_saved": 7644818,
+        "pct_tokens_saved": 0.37816685178073833,
+        "wrongly_cut_resolved": 182,
+        "pct_wrongly_cut_resolved": 0.6319444444444444,
+        "effective_resolved": 106,
+        "cost_per_resolved_task_tokens": 118590.99056603774,
+        "baseline_cost_per_resolved": 70192.57986111111,
+        "cost_reduction_ratio": 1.6895089310108242
+      },
+      "grace_5": {
+        "grace": 5,
+        "tokens_saved": 7470420,
+        "pct_tokens_saved": 0.3695398913198278,
+        "wrongly_cut_resolved": 182,
+        "pct_wrongly_cut_resolved": 0.6319444444444444,
+        "effective_resolved": 106,
+        "cost_per_resolved_task_tokens": 120236.25471698113,
+        "baseline_cost_per_resolved": 70192.57986111111,
+        "cost_reduction_ratio": 1.7129482198102792
+      }
+    },
+    "e1_threshold_tokens_unres_ge_10pct": true,
+    "e1_threshold_cut_loss_le_2pct": false,
+    "e1_pursue_loop_recovery": false
+  },
+  "e2_step_census": {
+    "by_class": {
+      "read_only": {
+        "step_count": 14867,
+        "step_share": 0.42392358140861136,
+        "completion_tokens_estimate": 502902,
+        "prompt_tokens_estimate": 261962199,
+        "total_tokens_cost": 262465101,
+        "cost_share": 0.33629958210508615
+      },
+      "test_run": {
+        "step_count": 8591,
+        "step_share": 0.24496720844026235,
+        "completion_tokens_estimate": 152605,
+        "prompt_tokens_estimate": 226136018,
+        "total_tokens_cost": 226288623,
+        "cost_share": 0.2899462407005318
+      },
+      "edit": {
+        "step_count": 6001,
+        "step_share": 0.1711149130310807,
+        "completion_tokens_estimate": 385815,
+        "prompt_tokens_estimate": 161722273,
+        "total_tokens_cost": 162108088,
+        "cost_share": 0.20771097583085735
+      },
+      "other": {
+        "step_count": 5611,
+        "step_share": 0.15999429712004562,
+        "completion_tokens_estimate": 306585,
+        "prompt_tokens_estimate": 129281877,
+        "total_tokens_cost": 129588462,
+        "cost_share": 0.16604320136352466
+      }
+    },
+    "routable_cost_share": 0.626245822805618,
+    "model_transitions_count": 14272,
+    "routing_savings_bounds": {
+      "price_ratio_0.1": {
+        "price_ratio_r": 0.1,
+        "theoretical_savings_upper_bound": 0.5636212405250562,
+        "cache_penalty_share": 0.08125093234853031,
+        "cache_aware_net_savings": 0.48237030817652593
+      },
+      "price_ratio_0.25": {
+        "price_ratio_r": 0.25,
+        "theoretical_savings_upper_bound": 0.4696843671042135,
+        "cache_penalty_share": 0.08125093234853031,
+        "cache_aware_net_savings": 0.3884334347556832
+      }
+    },
+    "e2_threshold_routable_cost_ge_40pct": true,
+    "e2_pursue_tier_routing": true
+  },
+  "compute_time_seconds": 34.23882722854614
+}

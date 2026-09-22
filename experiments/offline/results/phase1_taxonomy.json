@@ -1,0 +1,17 @@
+{
+  "total_tool_calls": 127347,
+  "sample_size": 100,
+  "sample_distribution": {
+    "read_only": 44,
+    "test_run": 21,
+    "edit": 18,
+    "other": 17
+  },
+  "unit_tests": {
+    "total": 8,
+    "passed": 8,
+    "failed": 0
+  },
+  "csv_export_path": "experiments/offline/results/sample_for_human_labels.csv",
+  "agreement_threshold": 0.95
+}
