@@ -115,3 +115,83 @@ def test_detect_deleted_test():
     assert report.deleted_tests_count == 1
     types = [v.violation_type for v in report.violations]
     assert "TEST_DELETED" in types
+    assert report.has_structural_tampering
+
+
+def test_ignore_root_reproduction_scratch():
+    interrogator = TestDiffInterrogator()
+    diff = """diff --git a/reproduce_issue.py b/reproduce_issue.py
+new file mode 100644
+--- /dev/null
++++ b/reproduce_issue.py
+@@ -0,0 +1,5 @@
++try:
++    assert False
++except Exception:
++    pass
++"""
+    report = interrogator.interrogate_diff(diff)
+    assert not report.touches_test_files
+    assert report.is_adequate
+    assert not report.has_structural_tampering
+
+
+def test_modified_assertion_vs_structural():
+    interrogator = TestDiffInterrogator()
+    diff = """diff --git a/tests/test_parser.py b/tests/test_parser.py
+--- a/tests/test_parser.py
++++ b/tests/test_parser.py
+@@ -12,2 +12,2 @@
+-    assert token == "OLD"
++    assert token == "NEW"
+"""
+    report = interrogator.interrogate_diff(diff)
+    assert report.touches_test_files
+    assert report.modified_assertions_count == 1
+    # Modified assertion is not structural deletion
+    assert not report.has_structural_tampering
+    assert not report.has_critical_weakening
+    assert report.is_adequate
+
+
+def test_main_cli_clean(capsys):
+    from layer.test_diff_interrogator import main_cli
+    import io
+    import sys
+
+    clean_diff = """diff --git a/src/calc.py b/src/calc.py
+--- a/src/calc.py
++++ b/src/calc.py
+@@ -1,2 +1,2 @@
+-x = 1
++x = 2
+"""
+    old_stdin = sys.stdin
+    sys.stdin = io.StringIO(clean_diff)
+    try:
+        ret = main_cli([])
+        assert ret == 0
+    finally:
+        sys.stdin = old_stdin
+
+
+def test_main_cli_tampering_veto(capsys):
+    from layer.test_diff_interrogator import main_cli
+    import io
+    import sys
+
+    bad_diff = """diff --git a/tests/test_foo.py b/tests/test_foo.py
+--- a/tests/test_foo.py
++++ b/tests/test_foo.py
+@@ -10,3 +10,0 @@
+-def test_security():
+-    assert verify_pass()
+"""
+    old_stdin = sys.stdin
+    sys.stdin = io.StringIO(bad_diff)
+    try:
+        ret = main_cli([])
+        assert ret == 1
+    finally:
+        sys.stdin = old_stdin
+

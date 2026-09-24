@@ -17,6 +17,7 @@ setup(
     entry_points={
         "console_scripts": [
             "arma=layer.cli:main",
+            "arma-veto=layer.test_diff_interrogator:main_cli",
         ],
     },
     classifiers=[

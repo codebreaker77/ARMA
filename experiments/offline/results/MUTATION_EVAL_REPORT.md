@@ -1,7 +1,7 @@
 # Module B Evaluation: Targeted Mutation Probe Engine
 
 ## Executive Summary
-We executed the **ARMA Targeted Mutation Probe Engine** on a stratified cohort of $N=132$ agent patches across 19 repositories from `nebius/SWE-rebench-openhands-trajectories`. 
+We executed the **ARMA Targeted Mutation Probe Engine** on a stratified cohort of $N=391$ agent patches across 24 repositories from `nebius/SWE-rebench-openhands-trajectories`. 
 
 For each instance:
 1. The repository was checked out at the exact `base_commit`.
@@ -16,8 +16,8 @@ For each instance:
 
 | Split | Sample Size ($n$) | Base Resolved Rate | AUROC | 95% Cluster Bootstrap CI |
 |:---|:---:|:---:|:---:|:---:|
-| **Dev Split** (Threshold Derivation) | 91 | 45.1% | **0.697** | [0.550, 0.813] |
-| **Frozen Test Split** (Final Evaluation) | 41 | 53.7% | **0.602** | [0.450, 0.758] |
+| **Dev Split** (Threshold Derivation) | 272 | 41.2% | **0.657** | [0.548, 0.743] |
+| **Frozen Test Split** (Final Evaluation) | 119 | 57.1% | **0.586** | [0.511, 0.701] |
 
 ---
 
@@ -28,10 +28,10 @@ Rather than asserting an arbitrary 50% threshold, the optimal threshold was deri
 - **Optimal Derived Kill-Ratio Threshold ($\tau^*$)**: **20.0%**
 
 ### Frozen Test Split Performance at $\tau^* = 20.0\%$:
-- **Test Precision**: **77.8%**
-- **Test Recall**: **31.8%**
-- **Test F1 Score**: **0.452**
-- **Overall Accuracy**: **58.5%**
+- **Test Precision**: **76.9%**
+- **Test Recall**: **29.4%**
+- **Test F1 Score**: **0.426**
+- **Overall Accuracy**: **54.6%**
 
 ---
 

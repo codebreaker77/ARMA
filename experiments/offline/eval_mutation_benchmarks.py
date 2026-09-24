@@ -145,7 +145,7 @@ def run_mutation_evaluation(max_instances: Optional[int] = None):
         cohort = cohort[:max_instances]
 
     n_total = len(cohort)
-    print(f"Starting Mutation Probe Evaluation on N={n_total} instances...")
+    print(f"Starting Mutation Probe Evaluation on N={n_total} instances...", flush=True)
 
     # Load existing results if resuming
     results = []
@@ -155,7 +155,7 @@ def run_mutation_evaluation(max_instances: Optional[int] = None):
             with open(RESULTS_JSON_PATH, "r", encoding="utf-8") as f:
                 results = json.load(f)
                 processed_iids = {r["instance_id"] for r in results}
-            print(f"Resuming: found {len(results)} previously evaluated instances.")
+            print(f"Resuming: found {len(results)} previously evaluated instances.", flush=True)
         except Exception:
             results = []
 
@@ -174,7 +174,7 @@ def run_mutation_evaluation(max_instances: Optional[int] = None):
         base_commit = inst["base_commit"]
         model_patch = inst["model_patch"]
 
-        print(f"[{idx}/{n_total}] Evaluating {iid} ({repo_name} | {split} | resolved={resolved})...")
+        print(f"[{idx}/{n_total}] Evaluating {iid} ({repo_name} | {split} | resolved={resolved})...", flush=True)
 
         try:
             repo_dir = ensure_repo_cloned(repo_name)

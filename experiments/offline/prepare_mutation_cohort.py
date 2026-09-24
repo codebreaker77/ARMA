@@ -1,4 +1,4 @@
-"""Prepare a stratified cohort of 150-200 instances for sandbox mutation-kill-ratio evaluation."""
+"""Prepare an expanded stratified cohort of 350-400 instances for sandbox mutation evaluation."""
 
 import json
 import os
@@ -7,12 +7,11 @@ from datasets import load_dataset
 
 from experiments.offline.config import (
     SAMPLED_DATA_PATH,
-    RESULTS_DIR,
+    DATA_DIR,
     RANDOM_SEED,
     is_dev_repo,
 )
 
-# High-density, fast pure-Python repositories suitable for deterministic local/sandbox testing
 PURE_PYTHON_REPOS = [
     "tobymao/sqlglot",
     "asottile/pyupgrade",
@@ -33,21 +32,77 @@ PURE_PYTHON_REPOS = [
     "python-cmd2/cmd2",
     "burnash/gspread",
     "oasis-open/cti-python-stix2",
+    "networkx/networkx",
+    "hgrecco/pint",
+    "wemake-services/wemake-python-styleguide",
+    "pypa/setuptools_scm",
+    "frictionlessdata/frictionless-py",
 ]
 
 
 def prepare_cohort():
-    print("Loading trajectory data...")
-    traj_df = pd.read_parquet(SAMPLED_DATA_PATH)
-    
+    print("Loading trajectory data from sampled_trajectories_2000.parquet and rg0.parquet...")
+    df1 = pd.read_parquet(SAMPLED_DATA_PATH)
+    rg0_path = os.path.join(DATA_DIR, "rg0.parquet")
+    if os.path.exists(rg0_path):
+        df2 = pd.read_parquet(rg0_path)
+        traj_df = pd.concat([df1, df2], ignore_index=True)
+    else:
+        traj_df = df1
+
+    # Deduplicate by instance_id, preferring rows with non-empty model_patch
+    traj_df = traj_df.sort_values(by="model_patch", key=lambda s: s.str.len(), ascending=False)
+    traj_df = traj_df.drop_duplicates(subset=["instance_id"]).reset_index(drop=True)
+
+    print(f"Total unique trajectories across datasets: {len(traj_df)}")
+
     print("Loading SWE-rebench metadata...")
     ds = load_dataset("nebius/SWE-rebench", split="test")
     bench_map = {x["instance_id"]: x for x in ds}
 
-    # Filter for instances with non-empty patch and belonging to pure-python repos
+    # Load existing evaluated instances to guarantee 100% overlap
+    results_path = os.path.join("experiments", "offline", "results", "mutation_eval_results.json")
+    existing_iids = set()
+    if os.path.exists(results_path):
+        with open(results_path, "r", encoding="utf-8") as f:
+            for item in json.load(f):
+                existing_iids.add(item["instance_id"])
+    print(f"Found {len(existing_iids)} already evaluated instances to preserve.")
+
+    # Filter for candidate instances
     candidates = []
+    seen_iids = set()
+
+    # First add all existing evaluated instances if they have bench metadata
     for idx, row in traj_df.iterrows():
         iid = row["instance_id"]
+        if iid in existing_iids and iid in bench_map and iid not in seen_iids:
+            repo = row["repo"]
+            patch = row.get("model_patch") or ""
+            b_meta = bench_map[iid]
+            candidates.append({
+                "trajectory_id": row["trajectory_id"],
+                "instance_id": iid,
+                "repo": repo,
+                "resolved": bool(row["resolved"]),
+                "split": "dev" if is_dev_repo(repo) else "test",
+                "base_commit": b_meta["base_commit"],
+                "test_patch": b_meta.get("test_patch", ""),
+                "fail_to_pass": b_meta.get("FAIL_TO_PASS", []),
+                "pass_to_pass": b_meta.get("PASS_TO_PASS", []),
+                "model_patch": patch,
+                "patch_lines": len(patch.splitlines()),
+            })
+            seen_iids.add(iid)
+
+    print(f"Added {len(candidates)} previously evaluated instances.")
+
+    # Next add new pure-python candidates
+    new_added = 0
+    for idx, row in traj_df.iterrows():
+        iid = row["instance_id"]
+        if iid in seen_iids:
+            continue
         repo = row["repo"]
         patch = row.get("model_patch") or ""
         if not patch.strip():
@@ -71,38 +126,26 @@ def prepare_cohort():
             "model_patch": patch,
             "patch_lines": len(patch.splitlines()),
         })
+        seen_iids.add(iid)
+        new_added += 1
 
+    print(f"Added {new_added} new candidate instances.")
     cand_df = pd.DataFrame(candidates)
-    print(f"Total pure-Python candidate instances with patches: {len(cand_df)}")
-    print(f"  - Repositories: {cand_df['repo'].nunique()}")
+    print(f"\nFinal Selected Cohort: N={len(cand_df)} instances")
+    print(f"  - Dev instances : {(cand_df['split'] == 'dev').sum()}")
+    print(f"  - Test instances: {(cand_df['split'] == 'test').sum()}")
     print(f"  - Resolved base rate: {cand_df['resolved'].mean()*100:.1f}%")
-    print(f"  - Split distribution: {cand_df['split'].value_counts().to_dict()}")
+    print(f"  - Repositories: {cand_df['repo'].nunique()}")
 
-    # Stratified sampling of N=150 (roughly 70% dev, 30% test)
-    dev_cand = cand_df[cand_df["split"] == "dev"]
-    test_cand = cand_df[cand_df["split"] == "test"]
+    manifest_path = os.path.join(DATA_DIR, "mutation_eval_manifest.json")
+    # Backup old manifest if not backed up
+    bak_path = os.path.join(DATA_DIR, "mutation_eval_manifest_150.json.bak")
+    if os.path.exists(manifest_path) and not os.path.exists(bak_path):
+        os.rename(manifest_path, bak_path)
 
-    n_dev = min(105, len(dev_cand))
-    n_test = min(45, len(test_cand))
-
-    sample_dev = dev_cand.sample(n=n_dev, random_state=RANDOM_SEED)
-    sample_test = test_cand.sample(n=n_test, random_state=RANDOM_SEED)
-
-    selected_cohort = pd.concat([sample_dev, sample_test], ignore_index=True)
-    n_total = len(selected_cohort)
-    print(f"\nFinal Selected Cohort: N={n_total} instances")
-    print(f"  - Dev instances : {len(sample_dev)}")
-    print(f"  - Test instances: {len(sample_test)}")
-    print(f"  - Resolved instances: {selected_cohort['resolved'].sum()} ({selected_cohort['resolved'].mean()*100:.1f}%)")
-
-    manifest_path = os.path.join("experiments", "offline", "data", "mutation_eval_manifest.json")
     with open(manifest_path, "w", encoding="utf-8") as f:
-        json.dump(selected_cohort.to_dict(orient="records"), f, indent=2)
-    print(f"Saved cohort manifest to {manifest_path}")
-
-    # Print repo distribution
-    print("\nRepo distribution in cohort:")
-    print(selected_cohort["repo"].value_counts())
+        json.dump(cand_df.to_dict(orient="records"), f, indent=2)
+    print(f"Saved expanded cohort manifest to {manifest_path}")
 
 
 if __name__ == "__main__":

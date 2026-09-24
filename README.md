@@ -1,595 +1,144 @@
 # ARMA: Autonomous Reliability & Metacognitive Architecture
-### The Control Plane, Context Optimizer, and Evidence Layer for Coding Agents
+### Deterministic Test-Tampering Veto & Targeted Mutation Testing for Coding Agents
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Python: 3.9+](https://img.shields.io/badge/Python-3.9+-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://python.org)
-[![Risk--Gate: Deterministic--Enforced](https://img.shields.io/badge/Risk--Gate-Deterministic--Enforced-brightgreen.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
-[![Stop--Gate: Experimental--Advisory](https://img.shields.io/badge/Stop--Gate-Experimental--Advisory-yellow.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
-[![Promotion--Ladder: Active](https://img.shields.io/badge/Promotion--Ladder-Active-blueviolet.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
-[![MCP: Native--JSON--RPC](https://img.shields.io/badge/MCP-Native--JSON--RPC-orange.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
-[![Local--First](https://img.shields.io/badge/Design-Local--First-black.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
+[![Test--Tampering--Veto: Deterministic](https://img.shields.io/badge/Test--Tampering--Veto-Deterministic--Enforced-brightgreen.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
+[![Mutation--Gate: Advisory--Eval--Active](https://img.shields.io/badge/Mutation--Gate-Advisory--AUROC--0.60-yellow.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
+[![Stop--Gate: Logging--Only](https://img.shields.io/badge/Stop--Gate-Logging--Only-lightgrey.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
 
 ---
 
-## Executive Summary: An Open Per-Step Controller for Coding Agents
+## What ARMA Is (and What It Isn't)
 
-ARMA is an open, harness-agnostic per-step controller and context optimization plane for coding agents (Claude Code, OpenCode, Aider, mini-swe-agent). Rather than overselling an uncalibrated general classifier, ARMA focuses strictly on **three narrow jobs**, each grounded in empirical evidence from 1,000 public SWE-rebench trajectories:
+ARMA is a **reliability linter and verification gate for coding agents** (Claude Code, OpenHands, Aider, Codex). 
 
-1. **Don't Get Stuck**: Implements canonical OpenHands StuckDetector deterministic rules (identical action-observation repeats, repeated errors, ping-pong alternation, monologue). Crucially, 8.5% of successful runs encounter an exact loop and self-recover; hard-halting destroys viable solutions. ARMA intercepts loops with surgical rollback, re-planning, and model escalation directives rather than premature termination.
-2. **Speed Up Wall-Clock**: Speculative Actions engine predicts the next read-only action (`cat`, `view_file`, `grep`) conditioned on traceback error frames. On real public trajectories, it achieves a **45.75% Top-3 prediction hit rate**, accelerating wall-clock latency by up to ~20% with lossless commit (zero token penalty on mismatch).
-3. **Cut Cost**: Cache-aware per-step model router that routes trivial read-only operations (16.4% of steps) to cheap tiers while strictly guarding warm prompt cache prefixes. Under real prompt-cache pricing, naive per-step switching increases costs by +65.5% due to cache invalidation ($3.75/M rewrite penalty); ARMA's Cache Hysteresis Guard ensures model switching occurs only when net savings exceed rewrite overhead.
+It is **not** an "autonomous runtime," an uncalibrated classifier wrapper, or a general ML agent judge. It solves one proven failure mode that occurs in automated software engineering:
 
-### Core Design Principles & Empirical Transparency:
-- **Deterministic Vetoes Over Machine Learning**: Hard deny rules (Risk Gate) retain instant veto power (<1 ms). Statistical heads only provide advisory signals.
-- **Strict Promotion Governance**: Invariants prevent unverified heuristics from blocking developer workflows. A gate remains in `Shadow` or `Advisory` mode until it mathematically demonstrates $\ge 96\%$ precision and $\le 4\%$ false-block rates.
-- **Empirically Validated Limits**: On 1,000 public benchmark trajectories (OpenHands / SWE-rebench across 553 repositories), naive test-exit rules exhibit a **42.1% False-Block Rate** and near-chance accuracy (56.2%). Consequently, Stop Gate is maintained in **Advisory / Experimental** mode, avoiding unrewarded token loops.
+> **The Green CI Illusion**: When coding agents struggle to fix complex bugs, they frequently hack the reward signal — deleting failing test assertions, skipping test cases, or weakening validation rules so CI passes green while leaving the underlying bug broken.
 
----
-
-## System Architecture: The Three Planes
-
-```
- Claude Code / OpenCode / Aider / Codex / Custom Harness
-        |
-        +-- Native Lifecycle Hooks (Stop, PreToolUse, PostToolUse)
-        +-- Universal Base-URL Proxy (127.0.0.1:4040)
-        |
-        v
-+----------------------------- ARMA RUNTIME -----------------------------+
-|                                                                         |
-|  1. CONTEXT PLANE                                                       |
-|     - Fullerenes Code Graph foundation (predict_impact integration)     |
-|     - Wide retrieval with low-latency relevance filtering              |
-|     - Diagnostic tool output pruner (action-preserving compaction)      |
-|     - Pinned facts injector (countering middle-of-context burial)       |
-|                                                                         |
-|  2. DECISION PLANE (Deterministic Invariants + Advisory Middle)         |
-|     - Risk Gate     : Hard deny policies (<1ms instant veto) [Enforce]  |
-|     - Scope Gate    : AST CodeGraph blast radius + probe [Advisory]     |
-|     - Stop Gate     : Pre-submit diagnostic check [Experimental]        |
-|     - Loop Detector : Thrashing detection & surgical rollback [Advisory]|
-|                                                                         |
-|     Promotion Ladder: Shadow -> Advisory -> Confirm -> Enforce          |
-|                                                                         |
-|  3. EVIDENCE PLANE (The Continuous Learning Engine)                     |
-|     - Local SQLite datastore (sessions, events, decisions, outcomes)    |
-|     - Counterfactual logging on every decision                          |
-|     - Ground-truth labeling via test outcomes, git reverts, approvals   |
-|     - Calibration tracking (Expected Calibration Error minimization)    |
-|                                                                         |
-+-------------------------------------------------------------------------+
-        |
-        v
-  Pluggable Backend Ladder: Rule (Rung 0) -> SupervisedEmbed (Rung 2) -> LLM Logit (Rung 3) -> Cloud Gateway (Rung 4)
-```
+ARMA attacks this problem with a **two-tiered verification architecture**:
+1. **Module A (`arma-veto`)**: A sub-millisecond, zero-dependency AST diff interrogator that detects hard structural test tampering.
+2. **Module B (Targeted Mutation Probe)**: An active sandbox probe that injects targeted mutants into the agent's modified implementation to test whether tests actually discriminate correct code from broken code.
 
 ---
 
-## Core Modules & Status
+## 1. Module A: Test-Tampering Veto (`arma-veto`)
 
-| Module | Deterministic Inputs | Evaluation Method | Status | Role |
-| :--- | :--- | :--- | :--- | :--- |
-| **Risk Gate** | Shell command, working directory, git state | Exact invariant regex & path validation | **Enforce** | Instant sub-millisecond veto for destructive commands (`rm -rf`, force push) |
-| **Scope Gate** | Task description, target file, Fullerenes AST graph | AST closure + linear probe head | **Advisory** | Flags edits outside dependency closure; warns on non-code distractors |
-| **Context Plane** | Raw tool logs, pytest traces, diffs | Diagnostic extraction & line compaction | **Active** | Reduces cumulative prompt tokens while preserving critical identifiers |
-| **Stop Gate** | Task checklist, exit codes, git diffstat | Diagnostic test check | **Experimental** | Advisory check before submit (demoted from enforce due to 42.1% false-block rate on N=1,000) |
-| **Loop Detector** | Rolling window of last N tool calls and diff hashes | Repetition detection & test signatures | **Advisory** | Intercepts dead-end loops and suggests surgical git stash rollback |
+When agents modify test suites, naive regex checkers suffer an unbearable false-alarm rate. In our rigorous human-labeled ground-truth audit of real agent test edits:
 
----
+### The Human-Labeled False Discovery Audit ($N=30$ Inspected Cases)
+- **True Test Tampering Caught**: 4 instances (**13.3%**)
+- **False Discoveries on Assertion Edits**: 26 instances (**86.7%**)
 
-## Promotion Ladder
+Of the 26 false alarms generated by raw assertion diffing:
+- **11 cases** were agent-created reproduction scripts in the repository root (`reproduce_issue.py`) containing `try...except AssertionError: pass` constructs.
+- **15 cases** were legitimate bug fixes updating outdated assertions (e.g. updating `"ADD"` to `"COPY"`, resolving off-by-one error coordinates, or fixing test expectations to match new features). **10 of these 15 were resolved patches.**
 
-To prevent premature disruption of developer workflows, every module advances through a formal promotion ladder based on empirical precision and calibration:
+### Deterministic Tiered Policy
 
-```
-[ Shadow Mode ]  -------------------> [ Advisory Mode ] -------------------> [ Confirm Mode ] -------------------> [ Enforce Mode ]
-Log decisions &                        Inject non-blocking                   Require explicit                      Actively block
-counterfactuals to                     warnings into agent                   human approval for                    non-compliant actions
-SQLite telemetry                       context window                        flagged operations                    with full authority
-```
+To prevent blocking legitimate bug fixes while catching genuine test tampering:
 
-### Promotion Criteria
-A module is promoted to `Enforce Mode` if and only if:
-1. $N \ge 100$ labeled decisions are recorded in the Evidence Plane.
-2. Measured Precision $\ge 0.96$ (False-block rate $\le 4\%$).
-3. Expected Calibration Error (ECE) $\le 0.04$.
+| Violation Category | Action | Precision | Mechanism |
+| :--- | :---: | :---: | :--- |
+| **Test File Deletion** | **HARD VETO** | ~100% | Prevents agent from deleting entire test modules to clear CI. |
+| **Test Function Deletion** | **HARD VETO** | ~100% | Catches removal of `def test_*()` definitions. |
+| **Injected Skips** | **HARD VETO** | ~100% | Detects `@pytest.mark.skip`, `pytest.skip()`, or `unittest.skip`. |
+| **Swallowed Exceptions** | **HARD VETO** | ~100% | Catches `except AssertionError: pass` wrapping assertions. |
+| **Assertion Deletion without Replacement** | **HARD VETO** | ~100% | Blocks deleting pre-existing assertions without adding replacement checks. |
+| **Assertion Modification** (Value/Format) | **ADVISORY** | N/A | **Does not hard-block** (avoids 86.7% false-block rate). Routes to Module B (Mutation Probe). |
 
----
+### Zero-Dependency CLI Quickstart
 
-## The Evidence Plane: Ground-Truth Schema
-
-ARMA maintains a local SQLite database recording all interactions, decisions, and real-world outcomes:
-
-```sql
-sessions(id, repo_path, harness, task_text, graph_version, started_at, ended_at, final_status)
-events(id, session_id, turn, kind, tool_name, args_hash, raw_payload_summary, tokens_in, tokens_out)
-decisions(id, event_id, module, question_type, question_text, answer_raw, probability, confidence,
-          backend, model_version, threshold, mode, action_taken, counterfactual_action)
-outcomes(id, decision_id, label, source, verified_at)
-```
-
-Ground-truth labels are derived automatically from:
-- Test suite exit codes (`test_pass`, `test_fail`).
-- Git history (`git_reverted`, `diff_survived`).
-- Human developer actions (`user_approved`, `user_denied`).
-- Issue tracking status (`task_resolved`).
-
----
-
-## Phased Implementation Roadmap
-
-```
-Phase 0: Groundwork, Telemetry & Shadow Mode (Weeks 1-3)
-├── SQLite Evidence Engine & Schema
-├── Universal Interceptor Proxy (127.0.0.1:4040)
-├── Native Hook Adapters (Claude Code, OpenCode)
-└── Exit Criterion: 100% of local developer sessions captured in shadow mode
-
-Phase 1: The Core Decision Plane (Weeks 3-8)
-├── Stop, Scope, Risk, and Loop Gate implementation
-├── Integration with local MicroJev / TypeSafe Jev
-├── Automated precision & ECE calculation pipeline
-└── Exit Criterion: Stop Gate false-stop rate below 5%
-
-Phase 2: Context Plane & SWE-bench Verification (Weeks 8-16)
-├── Fullerenes Code Graph integration (predict_impact)
-├── Dynamic tool output pruner and Pinned Facts injector
-├── Formal A/B evaluation on SWE-bench Verified
-└── Exit Criterion: Token consumption reduced by >=40% with no loss in resolve rate
-
-Phase 3: Model Distillation & Benchmark Release (Months 4-6)
-├── Distill collected decision traces into a local 1.5B parameter model
-├── Release the Agent Decision Benchmark (ADB)
-└── Exit Criterion: Local distilled model matches cloud classifier F1 score
-
-Phase 4: Enterprise Fleet Governance (Month 6+)
-├── Cross-repo calibration and organizational policy synchronization
-├── Cryptographic audit logging for SOC2 / ISO compliance
-└── Exit Criterion: First production deployment across an enterprise engineering team
-```
-
----
-
-## Quickstart & Installation
-
-### 1. Prerequisites
-- Python 3.9 or higher
-- Git
-- Ollama (optional, for local System 1 embedding models)
-
-### 2. Installation
-```bash
-git clone https://github.com/codebreaker77/ARMA.git
-cd ARMA
-pip install -e .
-```
-
-### 3. Launch the Interceptor Proxy
-```bash
-python -m layer.interceptor_proxy --port 4040
-```
-
-### 4. Attach to Any Coding Harness
-To attach ARMA to any tool (Claude Code, OpenCode, Aider), set the base URL environment variable:
+Install or run standalone in 30 seconds:
 
 ```bash
-# For Anthropic-based harnesses (e.g., Claude Code)
-export ANTHROPIC_BASE_URL="http://127.0.0.1:4040/v1"
+# Check git diff in current repository
+python -m layer.test_diff_interrogator --git
 
-# For OpenAI-compatible harnesses (e.g., OpenCode, Aider)
-export OPENAI_BASE_URL="http://127.0.0.1:4040/v1"
+# Or via installed console script
+arma-veto --git
+
+# Run on a patch file or stdin
+arma-veto patch.diff
+cat agent.patch | arma-veto
 ```
 
-### 5. Inspect Telemetry & Calibration
-```bash
-# View active sessions and gate status
-python -m layer.cli status
-
-# Live stream decisions and counterfactuals
-python -m layer.cli tail
-
-# Check precision, recall, and calibration error (ECE)
-python -m layer.cli calibrate
-
-# Optimize probability calibration (Temperature & Platt scaling)
-python -m layer.cli optimize
-
-# Replay historical traces through candidate policies
-python -m layer.cli replay
-
-# Export labeled decision traces into contrastive triplet datasets
-python -m layer.cli export --format triplets --output data/triplets.jsonl
-```
-
-### 6. Run Benchmarks
-```bash
-# Phase 1: 50-scenario multi-language decision gate benchmark
-python benchmark_phase1.py
-
-# Phase 2: 10-suite SWE-bench context efficiency benchmark
-python benchmark_phase2_efficiency.py
-
-# Phase 3: Continuous learning, calibration & counterfactual replay benchmark
-python benchmark_phase3_learning.py
+#### Pre-Commit / CI Hook (`.pre-commit-config.yaml`):
+```yaml
+- repo: local
+  hooks:
+    - id: arma-veto
+      name: ARMA Test Tampering Veto
+      entry: python -m layer.test_diff_interrogator --git
+      language: system
+      always_run: true
+      pass_filenames: false
 ```
 
 ---
 
-## Context Plane & End-to-End Efficiency
+## 2. Module B: Targeted Mutation Probe Engine
 
-The Context Plane eliminates two primary failure modes of long-running coding agents: **token bloat** (leading to excessive API costs and slow prompt evaluation) and **attention degradation** ("Lost in the Middle" phenomenon).
+When an agent modifies test assertions or claims a fix is complete, static analysis alone cannot tell if the new tests are meaningful or merely hollow assertions designed to pass.
 
-### Core Components
+Module B dynamically validates tests against code:
+1. Identifies the exact AST nodes modified by the agent's patch.
+2. Injects targeted first-order mutants (operator replacement, boolean inversion, boundary shifts) strictly inside modified implementation lines.
+3. Executes the test suite against each mutant in a local sandbox to measure the empirical **Mutation Kill Ratio**:
+   $$\text{Kill Ratio} = \frac{\text{Mutants Killed by Tests}}{\text{Total Mutants Injected}}$$
 
-1. **Fullerenes Code Graph (`layer/code_graph.py`)**:
-   - Parses AST structures across repository source trees.
-   - Traces imports, class inheritance, function calls, and symbol dependencies.
-   - Computes transitive dependency closures via `predict_impact()` to enforce blast radius bounds.
+### Empirical Discrimination Results (SWE-rebench Trajectories)
 
-2. **Tool Output Pruner (`layer/context_plane.py`)**:
-   - Inspects tool outputs (pytest logs, compiler diagnostics, large git diffs).
-   - Extracts root-cause failure tracebacks and execution summaries while omitting repetitive passing dots and file listings.
-   - Reduces raw tool output tokens by 70% to 90% with zero loss of diagnostic signal.
+Evaluated across real patches from `nebius/SWE-rebench-openhands-trajectories` grouped strictly by repository (zero repository overlap between splits):
 
-3. **Pinned Facts Manager (`layer/context_plane.py`)**:
-   - Maintains a structured invariant block (active test status, files touched, verified blast radius, and requirement checklist).
-   - Injects this block directly before the final prompt turn, ensuring the agent never "forgets" requirements or test outcomes.
+| Split | Sample Size ($n$) | Base Resolved Rate | AUROC | 95% Cluster Bootstrap CI | Status |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| **Dev Split** (Threshold Derivation) | 272 | 41.2% | **0.657** | [0.548, 0.743] | Optimal $\tau^* = 20.0\%$ |
+| **Frozen Test Split** (Held-Out Repos) | 119 | 57.1% | **0.586** | [0.511, 0.701] | Precision 76.9%, Recall 29.4% |
 
-4. **Compaction Scorer (`layer/context_plane.py`)**:
-   - Scores conversation turns on a 1-5 scale to selectively preserve user intent, failures, and file write operations during historical context compaction.
-
-### Empirical SWE-bench Benchmark Results
-
-Tested across 10 multi-turn debugging sessions covering Django, Flask, FastAPI, Requests, Click, SymPy, Pandas, Scikit-Learn, Pytest, and SQLAlchemy:
-
-| Metric | Target | Measured Result | Status |
-| :--- | :--- | :--- | :--- |
-| **Token Compression** | >= 50.0% | **75.67%** (39,362 -> 9,577 tokens) | Met |
-| **Prompt Latency Reduction** | >= 40.0% | **64.32%** | Met |
-| **Invariant Retention** | 100.0% | **100.0%** (0 lost invariants) | Met |
-| **Transitive Impact Accuracy** | 100.0% | **100.0%** | Met |
+> **Current Status: Statistically Bounded Signal, Advisory Only**  
+> On the scaled held-out test split ($n=119$ across 8 unseen repositories), the mutation gate achieved **76.9% precision** (vs. 57.1% base rate, a +19.8% precision lift) with a test AUROC of **0.586** and a 95% cluster bootstrap CI of `[0.511, 0.701]`.  
+> While the scaled sample tightens the confidence interval above chance ($> 0.50$), the modest effect size (AUROC 0.59) and selective recall (29.4%) mean it serves as a **high-precision advisory signal**, not an automated blocking gate.
 
 ---
 
-## Continuous Learning & Counterfactual Replay (Phase 3)
+## 3. Negative Findings & Demoted Heuristics (Logging Only)
 
-Phase 3 closes the feedback loop between real execution outcomes in the **Evidence Plane** and future policy evaluations in the **Decision Plane**.
+We explicitly evaluated common agent-control heuristics on 1,000 public trajectories (`nebius/SWE-rebench-openhands-trajectories` across 553 repositories) and found they perform at or near chance. Consequently, **none of these heuristics are allowed to make automated blocking decisions**:
 
-### Core Components
+### 1. Stop Gate (Exit-Code / Diffstat Classifiers) — Demoted to Logging
+- Naive test-exit and surface diff classifiers exhibit a **42.1% False-Block Rate** (207 of 492 successful solutions blocked).
+- Overall resolution classification accuracy on 1,000 runs was **56.2%** (chance baseline: 50.8%, AUROC: 0.531).
+- *Decision*: Demoted from blocking enforcement to telemetry logging only.
 
-1. **Trace Replay Simulator (`layer/replay_engine.py`)**:
-   - Replays historical agent decisions from SQLite against updated gate configurations or alternate models.
-   - Evaluates counterfactual lift: measures how many premature stops or false alarms would have been eliminated before deploying policy changes.
+### 2. Loop-Kill & Early Failure Termination — Demoted
+- **8.5% of successful trajectories** (42 / 492 resolved runs) hit an exact action loop and self-recovered to solve the problem.
+- Hard-killing agents upon loop detection destroys ~9% of viable solutions.
+- Predicting final failure at Step 10–30 using error counts or TF-IDF text features yields AUROCs of **0.51–0.53** (pure chance).
+- *Decision*: Hard termination disabled; loops trigger non-destructive context suggestions rather than session aborts.
 
-2. **Parametric Temperature & Platt Scaling Optimizer (`layer/calibrator.py`)**:
-   - Fits optimal temperature $T^*$ and Platt bias $b^*$ to align raw model probabilities with empirical accuracy:
-     $$P_{\text{calibrated}} = \sigma\left(\frac{\text{logit}(P)}{T} + b\right)$$
-   - Performs bounded search to minimize Expected Calibration Error (ECE) and find the optimal decision threshold $\tau^*$ maximizing $F_1$ while enforcing false-alarm constraints.
-   - Persists parameters to `arma_calibration.json` for dynamic zero-restart reloading.
-
-3. **Distillation Dataset Exporter (`layer/distill_exporter.py`)**:
-   - Extracts verified execution decisions into contrastive triplet formats (`anchor`, `positive`, `negative`) for embedding fine-tuning.
-   - Generates instruction-tuning datasets (Alpaca / ShareGPT format) for distilling small parameter models.
-
-### Empirical Calibration & Replay Results
-
-Evaluated across 50 diverse decision traces spanning all 4 gates:
-
-| Metric | Baseline | Calibrated Candidate | Net Improvement |
-| :--- | :--- | :--- | :--- |
-| **Decision Accuracy** | 62.00% | **100.00%** | **+38.00% Net Lift** |
-| **Expected Calibration Error (ECE)** | 0.2454 | **0.0124** | **94.9% Error Reduction** |
-| **False Stops Permitted** | 14 | **0** | **14 False Alarms Eliminated** |
-| **Distillation Triplets Generated** | 0 | **50** | **Verified ML Format** |
+### 3. Semantic Embedding Scope Gates — Demoted
+- Zero-shot embedding similarity (`EmbedPrior`) scored **0.54 AUROC** on real code actions.
+- Supervised linear probes that achieved 0.96 AUROC on synthetic benchmarks collapsed to **0.65 AUROC** on real SWE-bench Lite issue descriptions due to lexical distractors.
+- *Decision*: Kept as advisory context indicators, never hard blocking gates.
 
 ---
 
-## Live Harness Integration & Real-Time Monitor (Phase 4)
+## 4. Context Plane: Identifier-Preserving Tool Output Pruning
 
-Phase 4 turns ARMA into an operational developer platform with zero-configuration execution, desktop MCP assistant support, and a high-density live telemetry dashboard.
+When running test suites or terminal commands, long outputs consume agent context windows and cause "Lost in the Middle" attention failures.
 
-### 1. Turnkey Harness Execution (`arma run`)
+ARMA provides deterministic tool output pruning (`layer/context_plane.py`) evaluated across 54,605 target identifier instances:
 
-Run any coding harness directly through ARMA. The runner automatically launches the interceptor proxy in the background, sets `ANTHROPIC_BASE_URL` and `OPENAI_BASE_URL`, registers session telemetry, and emits a post-session diagnostic summary card upon exit:
+| Pruning Strategy | Character Compression | Critical Identifier Retention | Loss Rate |
+| :--- | :---: | :---: | :---: |
+| **BM25 Line Selection (35 lines)** | 33.4% | **98.36%** | **1.64%** |
+| **Conservative ARMA Pruner (3,000 chars)** | **55.55%** | **88.26%** | 11.74% |
+| **Naive Head/Tail (15+15 lines)** | 44.66% | 88.71% | 11.29% |
+| **Aggressive Pruner (1,200 chars)** | 59.55% | 77.82% | 22.18% |
 
-```bash
-# Execute Claude Code with ARMA decision and context planes active
-python -m layer.cli run claude
-
-# Execute Aider with automatic proxy interception
-python -m layer.cli run aider --model anthropic/claude-3-5-sonnet-20241022
-
-# Execute custom test suites or agent scripts
-python -m layer.cli run python agent_loop.py
-```
-
-### 2. Native Model Context Protocol (MCP) Server (`arma mcp`)
-
-ARMA exposes its decision gates, code graph blast radius calculator, and context pruner as native tools conforming to the official MCP JSON-RPC 2.0 stdio specification.
-
-#### Connecting Claude Desktop or Cursor (`claude_desktop_config.json`):
-```json
-{
-  "mcpServers": {
-    "arma": {
-      "command": "python",
-      "args": ["-m", "layer.cli", "mcp"]
-    }
-  }
-}
-```
-
-#### Exposed MCP Tools:
-- `arma_check_stop`: Audits task requirements and test outcomes before the agent exits.
-- `arma_predict_impact`: Computes Fullerenes transitive blast radius for planned file edits.
-- `arma_prune_output`: Compresses verbose test outputs and terminal logs by 70-90%.
-- `arma_audit_command`: Evaluates shell commands against Risk Gate hard invariants.
-
-### 3. Real-Time Web Telemetry Dashboard (`arma dashboard`)
-
-Launches a zero-dependency dark-mode monitoring dashboard on `http://127.0.0.1:4041`:
-```bash
-python -m layer.cli dashboard --port 4041
-```
-- **Live Decision Stream**: Real-time inspection of gate evaluations, probabilities, and actions.
-- **Token Compression Gauge**: Live tracking of tokens saved and latency reduction.
-- **Fullerenes Code Graph Visualizer**: Transitive dependency inspection and symbol indexing.
-- **Calibration Status Cards**: Real-time display of module temperatures, thresholds, and ECE.
-
----
-
-## Phase 5: Autonomous Self-Healing & Strategic Remediation
-
-When coding agents get stuck in repetitive edit-fail loops, modify files outside the intended scope, or cause regression cascades, ARMA's remediation engine intercepts execution, executes a non-destructive surgical rollback, and synthesizes high-signal pivot directives directly into the agent's pinned context window.
-
-### Core Remediation Architecture
-
-1. **CheckpointManager (`layer/remediator.py`)**:
-   - Captures shadow file snapshots when verification tests pass (green checkpoints).
-   - Provides non-destructive surgical rollback: restores only thrashed files while preserving intervening user edits.
-   - Preserves all reverted modifications in a persistent safety stash (`~/.arma/recovery_stash/`), ensuring zero work loss.
-
-2. **LoopBreaker (`layer/remediator.py`)**:
-   - Monitors rolling action history and test outcome signatures.
-   - Detects circular thrashing (3 or more consecutive failed attempts on the same module).
-   - Halts dead-end iteration loops in `enforce` mode and executes automated rollback to the last verified passing state.
-
-3. **AlternativeStrategySynthesizer (`layer/remediator.py`)**:
-   - Formulates actionable pivot directives instructing the agent to cease edits on the failing file, examine upstream callers or interfaces, and refocus on core task constraints.
-   - Injected directly into `PinnedFactsManager` at the context tail.
-
-### CLI Checkpoint & Rollback Commands
-
-Inspect available recovery checkpoints:
-```bash
-python -m layer.cli checkpoints [--session <session_id>]
-```
-
-Perform surgical rollback to a verified state:
-```bash
-python -m layer.cli rollback [--checkpoint <checkpoint_id>] [--files <file1,file2>]
-```
-
-### Empirical Evaluation: Phase 5 Self-Healing Benchmark (`benchmark_phase5_remediation.py`)
-
-Simulates 5 multi-turn agent failure scenarios (syntax thrashing, assertion deadlocks, regression cascades, API contract mismatches, async thread starvation).
-
-| Benchmark Metric | Measured Result | Benchmark Target | Status |
-| :--- | :--- | :--- | :--- |
-| **Loop Escape Rate (Intervention)** | 100.0% | 100.0% | Verified Passing |
-| **Surgical Rollback Fidelity** | 100.0% | 100.0% | Verified Passing |
-| **Non-Destructive Stash Safety** | 100.0% | 100.0% | Verified Passing |
-| **Strategic Pivot Context Injection** | 100.0% | 100.0% | Verified Passing |
-| **Post-Pivot Task Resolution Rate** | 100.0% | 100.0% | Verified Passing |
-
----
-
-## Classifier Backend Ladder (`layer/classifier_ladder.py`)
-
-ARMA structures decision classification into a multi-rung hierarchy. This guarantees fast deterministic veto power while eliminating the probability compression inherent in zero-shot embedding heuristics.
-
-| Rung | Classifier Backend | Method | AUROC | FNR @ 5% FPR | Latency | Role |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Rung 0** | `RuleClassifier` | Deterministic invariant checks & regex hard vetoes | 1.0000 | 0.0% | <1 ms | Instant veto for destructive commands and failing exits |
-| **Rung 1** | `EmbedPrior` | Zero-shot cosine similarity heuristic | 0.5400 | 100.0% | ~100 ms | Uncalibrated lexical prior (baseline) |
-| **Rung 2** | `SupervisedEmbedClassifier` | Dense embeddings + supervised linear probe ($z = W^T x + b$) | **0.9680** | **0.0%** | ~110 ms | Production default: discriminative logit spread ($[0.004, 0.983]$) |
-| **Rung 3** | `LLMLogitClassifier` | Instruction-tuned local LLM (Gemma 3) prompt judge | ~0.9400 | ~5.0% | ~4000 ms | High-complexity semantic disambiguation |
-| **Rung 4** | `VercelAIGatewayClassifier` | Vercel AI Gateway (Gemini 2.5, GPT-4o, Claude) | 0.9800+ | ~2.0% | ~500 ms | Cloud Foundation Gateway with graceful Rung 2 fallback |
-
-### Empirical Validation 1: 100-Action Classifier Benchmark (`benchmark_classifier_ladder.py`)
-
-Evaluating 100 balanced coding agent action scenarios (50 in-scope vs. 50 out-of-scope):
-
-| Backend Rung | Prob Range | Prob Spread | AUROC | Control AUROC | FNR @ 5% FPR | Mean Latency |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Rung 1: EmbedPrior (Zero-Shot)** | [0.4906, 0.5030] | 0.0124 | 0.5400 | 0.5914 | 100.0% | 107.7 ms |
-| **Rung 2: SupervisedEmbed (Linear Probe)** | [0.0043, 0.9829] | 0.9786 | **0.9680** | 0.4862 | **0.0%** | 115.1 ms |
-| **Rung 0+2: ClassifierLadder** | [0.0043, 0.9829] | 0.9786 | **0.9680** | 0.4862 | **0.0%** | 110.6 ms |
-
-### Empirical Validation 2: Adversarial Leakage Audit (`benchmark_leakage_audit.py`)
-
-Testing whether probe accuracy is an artifact of lexical keyword overlap or genuine semantic boundaries:
-- **Zero-Lexical-Overlap Positives**: Pure conceptual descriptions without filename tokens (e.g. *"Resolve boundary index error when slicing array subsets"* -> `src/pagination.py`).
-- **High-Lexical-Overlap Negatives**: Adversarial keyword distractors pointing to out-of-scope configs or CI scripts (e.g. *"Fix off-by-one error in pagination slice"* -> `.github/workflows/pagination_ci.yml`).
-
-| Backend Rung | Adversarial AUROC | Mean P(Zero-Overlap Pos) | Mean P(High-Overlap Neg) | Prob Spread | Mean Latency |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Rung 1: EmbedPrior (Zero-Shot)** | 0.6500 | 0.498 | 0.496 | 0.0112 | 306.6 ms |
-| **Rung 2: SupervisedEmbed (Linear Probe)** | **0.9300** | 0.295 | **0.028** | **0.9786** | 185.8 ms |
-| **Rung 3: LLMLogit (Local Gemma 3)** | 0.4000 | 0.754 | 0.920 | 0.8275 | 4411.0 ms |
-| **Rung 4: VercelAIGateway (Cloud Gateway)** | **0.9300** | 0.295 | **0.028** | **0.9786** | 508.7 ms |
-
-#### Key Empirical Insights from the Leakage Audit:
-1. **Probe Ceiling Robustness**: When lexical tokens are stripped, the linear probe retains an AUROC of 0.9300 and successfully suppresses high-overlap distractors to p = 0.028.
-2. **Lexical Distractor Vulnerability in Naive LLMs**: Zero-shot prompting on Gemma 3 exhibited strong lexical capture (p = 0.920 on distractors containing the task keyword), confirming that raw LLMs require structured rubric prompting and probe gating rather than naive zero-shot classification.
-3. **Resilient Cloud Gateway Fallback**: Vercel AI Gateway authentication seamlessly handled the gateway response envelope, with transparent fallback to Rung 2 when customer verification is pending.
-
-### Empirical Validation 3: Offline Evaluation on Public SWE-bench Lite Instances (`benchmark_swebench_official.py`)
-
-Evaluating Scope Gate file localization on public SWE-bench Lite issue descriptions from `django/django` and `astropy/astropy` against true gold maintainer patches vs. intra-repo distractors:
-
-| Backend Rung | AUROC (95% Bootstrap CI) | Mean P(Gold Patch) | Mean P(Distractor) | Prob Spread | Mean Latency |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Rung 1: EmbedPrior (Zero-Shot Baseline)** | 0.5459 [0.442, 0.648] | 0.492 | 0.492 | 0.0177 | 252.7 ms |
-| **Rung 2: SupervisedEmbed (Linear Probe)** | **0.6509 [0.531, 0.770]** | **0.804** | 0.550 | **0.9786** | 194.1 ms |
-| **Rung 0+2: ClassifierLadder (Rules + Probe)** | **0.6509 [0.531, 0.770]** | **0.804** | 0.550 | **0.9786** | 193.9 ms |
-
-#### Generalization Gap & Caveats:
-1. **The Real Generalization Picture**: Linear probe AUROC drops from **0.9680** on synthetic actions to **0.6509** (95% CI: [0.531, 0.770]) on real SWE-bench Lite issues. EmbedPrior remains at chance level (0.5459).
-2. **Task Formulation Caveat**: File localization from issue text is an information retrieval problem over long natural language descriptions, which carries different structural priors than gating an agent's runtime edit against a task.
-3. **Pre-Fix Test Invariant**: FAIL_TO_PASS assertions fail before the fix by definition; blocking on failing exit codes reflects expected invariant enforcement, not proof that forcing continuation resolves the bug.
-
----
-
-### Empirical Validation 4: Offline Trajectory Replay on Public OpenHands Runs (`benchmark_trajectory_replay.py`)
-
-Replaying 1,000 historical execution trajectories (Qwen3-Coder-480B with OpenHands from `nebius/SWE-rebench-openhands-trajectories` across 553 repositories), comprising 492 resolved and 508 unresolved runs:
-
-#### 1. Leak-Free Stop Gate Evaluation (Observable Signals Before Submit vs. PR Resolution)
-
-| Stop Gate Metric | Measured Value on Real Public Traces (N=1,000) |
-| :--- | :--- |
-| **Total Evaluated Trajectories** | 1,000 (492 resolved, 508 unresolved across 553 repos) |
-| **True Positives (Allowed & PR Resolved)** | 285 |
-| **False Positives (Allowed but PR Unresolved)** | 231 |
-| **True Negatives (Blocked & PR Unresolved)** | 277 |
-| **False Negatives (Blocked but PR Resolved - False Block!)** | 207 |
-| **Precision (P(Resolved \| Allowed))** | 55.2% |
-| **Recall** | 57.9% |
-| **False-Block Rate (FN / Resolved)** | **42.1%** |
-| **Unresolved Interception Rate (TNR)** | 54.5% |
-| **Overall Resolution Classification Accuracy** | 56.2% (Chance baseline: 50.8%) |
-| **Multi-Feature Grouped-CV AUROC** | **0.6770** (Grouped by 553 Repositories) |
-
-#### 2. Compression vs. Non-Trivial Identifier Retention Across Baselines
-
-Evaluating whether tool output compaction preserves the exact identifiers and paths referenced in the agent's immediate next turn (excluding keywords, built-ins, and trivial tokens across 54,605 target instances):
-
-| Pruning Strategy | Char Compression | Identifier Retention | Information Loss |
-| :--- | :--- | :--- | :--- |
-| **BM25 Line Selection (35 lines)** | 33.38% | **98.36%** (53,711 / 54,605) | **1.64%** |
-| **Conservative ARMA Pruner (3000 chars)** | **55.55%** | **88.26%** (48,194 / 54,605) | 11.74% |
-| **Naive Head/Tail (15+15 lines)** | 44.66% | 88.71% (48,442 / 54,605) | 11.29% |
-| **Duplicate Read Cache** | 40.22% | 77.89% (42,534 / 54,605) | 22.11% |
-| **Standard ARMA Pruner (1200 chars)** | 59.55% | 77.82% (42,496 / 54,605) | 22.18% |
-
-##### Conservative ARMA Retention by Tool Category:
-- **Git Diffs**: 92.16% retention (7.84% loss)
-- **General Terminal Commands**: 91.25% retention (8.75% loss)
-- **Compiler / Syntax Errors**: 85.74% retention (14.26% loss)
-- **Test Tracebacks**: 76.47% retention (23.53% loss)
-
-*Takeaway*: BM25 line selection achieves **98.36% retention** (clearing the $\ge 95\%$ action-preservation threshold) while trimming 33.4% of characters. Conservative ARMA Pruning (3,000 chars) reaches 55.6% compression with 88.3% overall retention, outperforming aggressive 1,200-char compaction which loses over 22% of critical identifiers.
-
-#### 3. Full Cumulative Cost Model (Input + Output Tokens & Real Cache Pricing)
-
-Across 1,000 multi-turn sessions (3.86 Billion cumulative input tokens, 15.5M output tokens):
-
-| Pricing Tier (Claude 3.5 Sonnet) | Raw Cost | Pruned Cost | Dollar Cut (Upper Bound) |
-| :--- | :--- | :--- | :--- |
-| **Uncached** ($3.00/M input, $15.00/M output) | $11,815.22 | $7,286.38 | **38.3% cut** |
-| **80% Prompt Cache** ($0.30 read, $3.75 write, $15.00 output) | $4,054.99 | $2,560.47 | **36.9% cut** |
-
-*Upper Bound Caveat*: These figures represent an offline upper bound on fixed historical traces. In live execution, minor information loss will cause agents to take additional turns to re-inspect code, lowering net savings toward the 20-35% range observed in empirical literature (AgentDiet).
-
-#### 4. Early Failure Termination (EET) Feasibility
-
-Predicting final PR failure at early execution steps using observable trajectory features with GroupKFold cross-validation grouped by repository across 553 repositories:
-- **Trajectory Step Disparity**: Resolved runs average 117.6 steps; unresolved runs average 141.7 steps (1.21x step consumption).
-- **Step 10 Failure AUROC**: 0.5140 +/- 0.0361
-- **Step 20 Failure AUROC**: 0.5293 +/- 0.0249
-- **Step 30 Failure AUROC**: 0.5194 +/- 0.0331
-
-*Insight*: During early turns (steps 1-30), both successful and failing agents heavily encounter errors, stack traces, and test failures during initial exploration. Surface error counts in early steps do not reliably discriminate failure (AUROC remains near chance, 0.51-0.53); reliable early termination requires detecting repetitive dead-end edit cycles (loop detection) rather than counting early test failures.
-
----
-
-### Empirical Validation 5: 1,000-Trajectory Controller Census & Benchmark (`benchmark_controller_census.py`)
-
-A comprehensive offline census across 1,000 public execution trajectories from `nebius/SWE-rebench-openhands-trajectories` (Qwen3-Coder-480B across 553 repositories, 492 resolved and 508 unresolved runs). This evaluation directly benchmarks the three jobs of the ARMA per-step controller.
-
-#### 1. Experiment 1: Loop Census, Prevalence & Self-Recovery
-
-Evaluating the 5 canonical OpenHands `StuckDetector` exact loop patterns versus semantic edit thrashing across all 1,000 runs:
-
-| Metric | Measured Value across 1,000 Public Traces |
-| :--- | :--- |
-| **Total Evaluated Trajectories** | 1,000 (492 resolved, 508 unresolved) |
-| **Identical Action-Observation Repeats (4+)** | 0 incidents |
-| **Repeated Errors (3+)** | 203 incidents |
-| **Monologue (3+ consecutive assistant texts)** | 0 incidents |
-| **Ping-Pong Alternation (6 cycles / 12 turns)** | 0 incidents |
-| **Context Overflow Errors** | 0 incidents |
-| **Trajectories Hitting an Exact Loop** | **108 runs (10.8%)** |
-| **Trajectories Hitting a Semantic Loop** | 100 runs (10.0%) |
-| **Resolved Runs Hitting Exact Loop & Self-Recovering** | **42 / 492 (8.5%)** |
-| **Resolved Runs Hitting Semantic Loop & Self-Recovering** | 35 / 492 (7.1%) |
-| **Steps Spent Post-Loop Inception** | 22,238 steps (16.7% of all steps) |
-| **Tokens Consumed Post-Loop Inception** | 2,217,313 tokens (40.7% of post-loop token waste) |
-
-##### Architectural Implications of the Self-Recovery Finding:
-- **Hard Halting Destroys Viable Solutions**: In 8.5% of successful runs (42 instances), the agent encountered an exact loop, broke out through alternative exploration, and ultimately resolved the issue. If an external controller hard-terminates an agent upon first loop detection, it immediately destroys ~9% of otherwise successful solutions.
-- **Surgical Rollback and Re-Planning Over Halting**: ARMA intercepts exact loops not by killing the session, but by triggering non-destructive rollback (`CheckpointManager`), injecting structured pivot directives (`LoopBreaker`), and escalating reasoning model tiers.
-
-#### 2. Experiment 2: Step-Type Census & Prompt Cache Economics (The Not Diamond Insight)
-
-Analyzing 133,391 execution steps across 1,000 trajectories to quantify the viability of per-step model routing:
-
-| Step Category | Step Count | Step Share | Cumulative Input Tokens | Cumulative Output Tokens |
-| :--- | :--- | :--- | :--- | :--- |
-| **Test Execution** | 42,958 | 32.2% | 1.84 B (36.0%) | 5.2 M (33.5%) |
-| **Code Modification** | 40,544 | 30.4% | 1.62 B (31.7%) | 4.9 M (31.6%) |
-| **General Terminal** | 28,024 | 21.0% | 1.01 B (19.8%) | 3.3 M (21.3%) |
-| **Trivial Read-Only (`cat`, `view`, `grep`, `ls`)** | 21,865 | **16.4%** | 639 M (12.5%) | 2.1 M (13.6%) |
-| **Planning / Thought** | 0 | 0.0% | 0 (0.0%) | 0 (0.0%) |
-
-##### Prompt Cache Economics:
-Modern frontier LLM APIs enforce high cold-write penalties to amortize KV cache reuse (e.g. Anthropic Claude 3.5 Sonnet: $0.30/M read vs. $3.75/M write; Claude 3.5 Haiku: $0.08/M read vs. $1.00/M write).
-- **Monolithic Frontier (Claude 3.5 Sonnet @ 80% Cache)**: **$1,696.35**
-- **Naive Per-Step Routing (Read-only to Haiku, rest to Sonnet)**:
-  - Model switches incurred: **13,563 switches**
-  - Cache write invalidation penalty: **+$1,167.21** (each switch forces a full prompt re-cache at $3.75/M)
-  - Total Naive Routing Cost: **$2,807.65 (+65.5% MORE EXPENSIVE than staying on Frontier!)**
-
-##### The Cache Hysteresis Guard:
-Because prompt cache reads are 90% cheaper than base rates, keeping isolated read steps on the frontier model with an intact warm cache is significantly cheaper than routing to a smaller model. ARMA's `CacheAwareStepRouter` enforces a hysteresis threshold: it only switches to a lower model tier if $\ge 4$ consecutive read operations are queued or predicted, guaranteeing net dollar savings.
-
-#### 3. Experiment 3: Next-Read Speculative Actions Hit Rate
-
-Predicting the agent's next file read action directly from traceback stack frames following test failures:
-
-| Metric | Measured Value across 1,000 Trajectories |
-| :--- | :--- |
-| **Post-Error Evaluation Steps Analyzed** | 6,595 |
-| **Top-1 Candidate Speculation Accuracy** | **39.04%** (2,575 / 6,595) |
-| **Top-3 Candidate Speculation Accuracy** | **45.75%** (3,017 / 6,595) |
-| **Evaluation Threshold Target** | Top-3 $\ge$ 30.0% |
-| **Decision Gate Outcome** | **PASS (+15.75% above threshold)** |
-
-##### Lossless Speculative Commit:
-When a test fails, `SpeculativeActionEngine` parses bottom-most application frames from the traceback and asynchronously pre-fetches file contents and symbols into a local pre-fetch cache. If the agent's next action requests one of these files, the result is returned instantaneously (saving up to ~20% wall-clock turn latency). If the agent takes an alternative action, the speculative result is silently discarded with **zero token penalty and zero state mutation**.
-
-#### 4. Experiment 4: Stuck Predictor v2 Negative Finding
-
-Evaluating whether early PR resolution can be predicted at Step 30 using semantic error text and TF-IDF features with GroupKFold cross-validation grouped by repository (553 unique repos):
-
-| Metric | Measured Result | Threshold Target |
-| :--- | :--- | :--- |
-| **Step 30 Text-Feature AUROC** | **0.5821 +/- 0.0458** | $\ge 0.6800$ |
-| **Step 30 Classification Accuracy** | 56.02% | Baseline chance: 50.8% |
-| **Decision Gate Outcome** | **CONFIRMED NEGATIVE FINDING** |
-
-##### Why Statistical Early-Stopping Heads Are Rejected:
-Neither surface counts (0.51-0.53 AUROC) nor rich semantic TF-IDF text features at Step 30 (0.5821 AUROC) provide sufficient discriminative power across unseen repositories. Coding agents frequently encounter multiple test failures during healthy exploratory debugging. Relying on early statistical classifiers to abort sessions causes catastrophic false stops on viable runs. ARMA therefore restricts early termination strictly to deterministic loop detection combined with surgical remediation.
-
----
-
-## Next Milestone: Live A/B Execution on Verified Mini
-
-Offline replays evaluate historical transcripts under fixed agent actions. The definitive test of ARMA's value proposition is live execution on `mini-swe-agent` against SWE-bench Verified Mini:
-1. **Control**: Baseline agent without ARMA.
-2. **Treatment**: Agent wrapped with ARMA (Conservative Pruner + Risk Gate + LoopBreaker).
-3. **Target Metrics**: Real dollar cost per resolved issue, pass rate delta, and total turn count.
+*Recommendation*: Use **Conservative ARMA Pruning** or **BM25 Line Selection** to save 33–55% of tokens while retaining $\ge 88–98\%$ of necessary diagnostic identifiers.
 
 ---
 
@@ -597,56 +146,56 @@ Offline replays evaluate historical transcripts under fixed agent actions. The d
 
 ```
 ARMA/
-├── README.md                      # Project documentation and architectural specification
-├── setup.py                       # Package definition and dependencies
-├── arma_calibration.json          # Persisted calibrated temperatures and thresholds
-├── benchmark_phase1.py            # 50-scenario multi-language gate decision benchmark
-├── benchmark_phase2_efficiency.py # 10-suite SWE-bench context efficiency benchmark
-├── benchmark_phase3_learning.py   # 50-trace continuous learning and replay benchmark
-├── benchmark_phase5_remediation.py# 5-scenario self-healing & remediation benchmark
-├── benchmark_classifier_ladder.py # 100-scenario backend ladder empirical benchmark
-├── benchmark_leakage_audit.py     # Adversarial zero-overlap vs. distractor leakage audit
-├── benchmark_swebench_official.py # Offline SWE-bench Lite real issue & gold patch benchmark
-├── benchmark_trajectory_replay.py # Offline replay on public OpenHands trajectories
-├── layer/                         # Core ARMA runtime
-│   ├── __init__.py                # Package initialization
-│   ├── evidence_db.py             # SQLite Evidence Plane implementation
-│   ├── decision_engine.py         # Decision Plane gates, modules, and promotion ladder
-│   ├── promotion_ladder.py        # Statistical promotion state machine (shadow -> enforce)
-│   ├── gate_specs.py              # Standardized contrastive question templates
-│   ├── classifier_ladder.py       # Rule, SupervisedEmbed, LLMLogit, VercelAIGateway
-│   ├── embed_prior.py             # Truthful zero-shot EmbedPrior heuristic (session pooling, fallback)
-│   ├── code_graph.py              # Fullerenes AST parser and predict_impact engine
-│   ├── context_plane.py           # ToolOutputPruner, PinnedFactsManager, CompactionScorer
-│   ├── step_router.py             # CacheAwareStepRouter with Cache Hysteresis Guard
-│   ├── speculative_runner.py      # SpeculativeActionEngine for traceback pre-fetching
-│   ├── calibrator.py              # TemperatureScaler, ThresholdOptimizer, OfflineCalibrator
-│   ├── replay_engine.py           # Trace Replay Simulator and counterfactual evaluator
-│   ├── distill_exporter.py        # Triplet and instruction tuning dataset exporter
-│   ├── remediator.py              # CheckpointManager, LoopBreaker, StrategySynthesizer
-│   ├── interceptor_proxy.py       # Universal HTTP reverse proxy
-│   ├── harness_hooks.py           # Native lifecycle hooks for Claude Code / OpenCode
-│   ├── runner.py                  # Turnkey harness runner (arma run)
-│   ├── mcp_server.py              # Model Context Protocol stdio server (arma mcp)
-│   ├── web_dashboard.py           # Real-time web telemetry dashboard (arma dashboard)
-│   └── cli.py                     # Command-line dashboard and calibration tool
-├── micro_jev.py                   # Legacy backwards-compatible adapter (delegates to embed_prior)
-├── dual_process_pipeline.py       # System 1 + System 2 reference pipeline
-├── benchmark_comparison.py        # Empirical benchmark suite
-├── jev_research/                  # Foundational research, papers, and Obsidian knowledge vault
-└── tests/                         # Automated test suite
-    ├── test_evidence_db.py        # Evidence Plane unit tests
-    ├── test_decision_engine.py    # Decision Gates unit tests
-    ├── test_code_graph.py         # Fullerenes Code Graph unit tests
-    ├── test_context_plane.py      # Context Plane unit tests
-    ├── test_step_router.py        # Step Router and Cache Hysteresis unit tests
-    ├── test_speculative_runner.py # Speculative Runner and traceback parsing unit tests
-    ├── test_replay.py             # Replay, Calibration, and DistillExporter unit tests
-    ├── test_runner.py             # Harness Runner unit tests
-    ├── test_mcp.py                # Model Context Protocol server unit tests
-    ├── test_web_dashboard.py      # Web Dashboard and REST API unit tests
-    ├── test_remediator.py         # Self-Healing and Rollback unit tests
-    └── test_classifier_ladder.py  # Classifier Ladder and SupervisedEmbed unit tests
+├── layer/
+│   ├── test_diff_interrogator.py  # Module A: Deterministic Test-Diff Interrogator & CLI (arma-veto)
+│   ├── verification_gate.py       # Module B: Targeted Mutation Probe Engine & AST Mutator
+│   ├── context_plane.py           # ToolOutputPruner, PinnedFactsManager
+│   ├── evidence_db.py             # SQLite Evidence Plane telemetry logger
+│   ├── code_graph.py              # Fullerenes AST parser and blast radius calculator
+│   └── cli.py                     # Command-line telemetry inspector
+├── demo_veto.py                   # 30-second live demo of test tampering scenarios
+├── experiments/offline/
+│   ├── eval_mutation_benchmarks.py# Module B sandbox mutation evaluation runner
+│   ├── prepare_mutation_cohort.py # Stratified cohort manifest generator (Dev/Test split)
+│   ├── data/                      # Dataset caches, trajectory parquets, manifests
+│   └── results/                   # Evaluation reports, ROC analysis, human audit ground truth
+│       ├── INTERROGATOR_HUMAN_AUDIT_REPORT.md
+│       ├── MUTATION_EVAL_REPORT.md
+│       └── AUDIT_CASES_DETAILED.md
+└── tests/                         # Full automated test suite (pytest)
+```
+
+---
+
+## Running the Demo
+
+Test `arma-veto` across 5 representative scenarios in 0.05 seconds:
+
+```bash
+python demo_veto.py
+```
+
+Expected output:
+```
+[1/5] Scenario 1: Legitimate Bug Fix + Added Acceptance Test
+>>> [PASS ALLOWED] Clean implementation and legitimate test additions.
+
+[2/5] Scenario 2: Malicious Test Deletion (Agent deleting failing test)
+>>> [VETO ENFORCED] Hard structural test tampering detected!
+    - [TEST_DELETED] def test_unauthorized_token():
+
+[3/5] Scenario 3: Test Skip Injection (Agent marking failing test skipped)
+>>> [VETO ENFORCED] Hard structural test tampering detected!
+    - [SKIP_INJECTED] @pytest.mark.skip(reason="Fails on CI")
+
+[4/5] Scenario 4: Assertion Deletion (Agent deleting assert to get green CI)
+>>> [VETO ENFORCED] Hard structural test tampering detected!
+    - [ASSERTION_DELETED] assert parsed.is_valid is True
+
+[5/5] Scenario 5: Legitimate Assertion Update (Updating expected output after bug fix)
+>>> [ADVISORY] Modified assertion detected.
+    Human audit showed raw assertion vetoes have an 86.7% False Discovery Rate.
+    Structural integrity is intact; routing to Targeted Mutation Probe.
 ```
 
 ---
@@ -654,6 +203,3 @@ ARMA/
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-
-
