@@ -103,7 +103,42 @@ Evaluated across real patches from `nebius/SWE-rebench-openhands-trajectories` g
 
 ---
 
-## 3. Negative Findings & Demoted Heuristics (Logging Only)
+## 3. Comparison with Existing Approaches
+
+How does ARMA compare to existing testing, security, and verification tools?
+
+| Approach | Catches Deleted Tests? | Catches Hollow Tests? | Allows New Tests? | Allows Legitimate Bugfix Updates? | Latency |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Blanket Test Freeze** (`tests/**` lock) | Yes | Yes | ❌ **No** | ❌ **No** | <1 ms |
+| **Code Coverage** (Codecov / diff-cover) | No | ❌ **No** (blind to hollow asserts) | Yes | Yes | ~5 min |
+| **Full Mutation Testing** (`mutmut` / `PITest`) | Yes | Yes | Yes | Yes | ❌ **15–60 min** |
+| **LLM-as-a-Judge** (PR Review Bots) | Unreliable | Unreliable | Yes | Inconsistent | 5–10 s ($$) |
+| **`arma-veto`** (Module A: Deterministic AST Linter) | **Yes** | Defers to Module B | **Yes** | **Yes** | **<50 ms** |
+| **ARMA Mutation Probe** (Module B: Targeted AST Probe) | Yes | **Yes** (Kill Ratio) | **Yes** | **Yes** | **5–15 s** |
+
+### Tradeoffs & Why Existing Tools Fall Short for Agents
+
+1. **Blanket Test Freezing (`git checkout -- tests/` or `CODEOWNERS` locks)**:
+   - *Pros*: 100% precision against test tampering.
+   - *Cons*: **Zero flexibility**. The agent cannot write new acceptance tests for new features, nor can it update outdated assertion strings when fixing bugs (in our human audit, 10 out of 15 assertion edits were legitimate passing fixes).
+   - *Takeaway*: Ideal for static benchmark evaluation (SWE-bench); completely breaks real-world interactive development.
+
+2. **Code Coverage Gates (`diff-cover`, Codecov)**:
+   - *Pros*: Standard in enterprise CI.
+   - *Cons*: **Completely blind to reward hacking**. If an agent wraps failing assertions in `try...except AssertionError: pass` or deletes an assertion, the test lines still execute. Coverage reports 100% green. Coverage measures *execution*, not *assertion discrimination*.
+
+3. **Full-Codebase Mutation Testing (`mutmut`, `Cosmic Ray`)**:
+   - *Pros*: Decades of academic rigor.
+   - *Cons*: **Execution latency**. Generating and running hundreds of mutants across entire test suites takes 15 to 45+ minutes. You cannot run full mutation suites inside an interactive agent turn.
+   - *ARMA's Difference*: Module B restricts mutation *strictly to the diff lines* of the patch with a small mutant budget (5 mutants), finishing in 5–15 seconds.
+
+4. **LLM-as-a-Judge (Prompting GPT-4o / Claude to audit diffs)**:
+   - *Pros*: Flexible natural language understanding.
+   - *Cons*: Unreliable, vulnerable to prompt injection, high false-discovery on large diffs, and costs $0.03–$0.10 per call with 5–10s network latency.
+
+---
+
+## 4. Negative Findings & Demoted Heuristics (Logging Only)
 
 We explicitly evaluated common agent-control heuristics on 1,000 public trajectories (`nebius/SWE-rebench-openhands-trajectories` across 553 repositories) and found they perform at or near chance. Consequently, **none of these heuristics are allowed to make automated blocking decisions**:
 
@@ -125,7 +160,7 @@ We explicitly evaluated common agent-control heuristics on 1,000 public trajecto
 
 ---
 
-## 4. Context Plane: Identifier-Preserving Tool Output Pruning
+## 5. Context Plane: Identifier-Preserving Tool Output Pruning
 
 When running test suites or terminal commands, long outputs consume agent context windows and cause "Lost in the Middle" attention failures.
 
