@@ -1,0 +1,9 @@
+- id: arma-veto
+  name: ARMA Veto (Agent Test Tampering Linter)
+  description: Sub-50ms deterministic AST diff interrogator that blocks agent test tampering and evasion hacks.
+  entry: arma-veto
+  language: python
+  types: [text]
+  stages: [commit, push]
+  pass_filenames: false
+  args: ["--git"]
