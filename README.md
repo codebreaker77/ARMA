@@ -1,10 +1,12 @@
 # ARMA: Autonomous Reliability & Metacognitive Architecture
 ### Deterministic Test-Tampering Veto & Targeted Mutation Testing for Coding Agents
 
+[![PyPI: arma-veto](https://img.shields.io/pypi/v/arma-veto.svg?style=flat-square&color=blue)](https://pypi.org/project/arma-veto/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Python: 3.9+](https://img.shields.io/badge/Python-3.9+-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![Test--Tampering--Veto: Deterministic](https://img.shields.io/badge/Test--Tampering--Veto-Deterministic--Enforced-brightgreen.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
 [![Mutation--Gate: Advisory--Eval--Active](https://img.shields.io/badge/Mutation--Gate-Advisory--AUROC--0.60-yellow.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
+
 [![Stop--Gate: Logging--Only](https://img.shields.io/badge/Stop--Gate-Logging--Only-lightgrey.svg?style=flat-square)](https://github.com/codebreaker77/ARMA)
 
 ---
@@ -50,18 +52,16 @@ To prevent blocking legitimate bug fixes while catching genuine test tampering:
 
 ### Zero-Dependency CLI Quickstart
 
-Install or run standalone in 30 seconds:
+Install in 1 second via pip:
 
 ```bash
-# Check git diff in current repository
-python -m layer.test_diff_interrogator --git
+pip install arma-veto
 
-# Or via installed console script
+# Interrogate uncommitted git diff in current repository
 arma-veto --git
 
-# Run on a patch file or stdin
-arma-veto patch.diff
-cat agent.patch | arma-veto
+# Or pipe diff directly
+git diff origin/main...HEAD | arma-veto
 ```
 
 #### Pre-Commit / CI Hook (`.pre-commit-config.yaml`):
