@@ -69,6 +69,29 @@ diff --git a/tests/test_calculator.py b/tests/test_calculator.py
 +    assert format_date(ts) == "2024-01-01T00:00:00Z"
 """,
         "expected": "ADVISORY ONLY (Requires Targeted Mutation Probe, NOT blind veto)"
+    },
+    {
+        "name": "Scenario 6: Polyglot (TypeScript/Jest) - Injected it.skip()",
+        "diff": """diff --git a/src/__tests__/auth.test.ts b/src/__tests__/auth.test.ts
+--- a/src/__tests__/auth.test.ts
++++ b/src/__tests__/auth.test.ts
+@@ -15,2 +15,2 @@
+-it("validates token", async () => {
++it.skip("validates token", async () => {
+""",
+        "expected": "HARD VETO (SKIP_INJECTED)"
+    },
+    {
+        "name": "Scenario 7: Polyglot (Go) - Test Function Deletion",
+        "diff": """diff --git a/pkg/service/user_test.go b/pkg/service/user_test.go
+--- a/pkg/service/user_test.go
++++ b/pkg/service/user_test.go
+@@ -30,5 +30,0 @@
+-func TestAccessControl(t *testing.T) {
+-    assert.NoError(t, CheckAccess())
+-}
+""",
+        "expected": "HARD VETO (TEST_DELETED)"
     }
 ]
 
@@ -80,7 +103,7 @@ def run_demo():
     interrogator = TestDiffInterrogator()
 
     for idx, sc in enumerate(SCENARIOS, 1):
-        print(f"\n[{idx}/5] {sc['name']}")
+        print(f"\n[{idx}/{len(SCENARIOS)}] {sc['name']}")
         print(f"Expected Outcome: {sc['expected']}")
         report = interrogator.interrogate_diff(sc["diff"])
 

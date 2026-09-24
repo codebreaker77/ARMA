@@ -37,11 +37,48 @@ class VerificationOutcome:
     interrogation_report: Optional[InterrogationReport] = None
     mutation_result: Optional[MutationProbeResult] = None
 
+    def format_agent_feedback(self) -> str:
+        """Format structured, actionable feedback to guide coding agents when verification fails."""
+        if self.allow:
+            return "[VERIFICATION PASSED] Patch verification adequate. Tests provide valid discrimination against implementation mutations."
+
+        if self.stage == "test_diff_audit":
+            violations_detail = []
+            if self.interrogation_report:
+                for v in self.interrogation_report.violations[:3]:
+                    violations_detail.append(f"  - [{v.violation_type}] {v.file_path}:{v.line_number or '?'} -> {v.snippet}")
+            viol_str = "\n".join(violations_detail) if violations_detail else f"  - {self.reason}"
+            return (
+                f"[VERIFICATION FAILED: TEST TAMPERING DETECTED]\n"
+                f"Your patch modified or removed existing test protections:\n"
+                f"{viol_str}\n"
+                f"DIRECTIVE: You are strictly forbidden from deleting, weakening, or skipping existing tests to achieve green CI. "
+                f"Restore the original test assertions and fix the underlying implementation logic instead."
+            )
+
+        if self.stage == "mutation_probe":
+            survived_details = []
+            if self.mutation_result:
+                survived = [m for m in self.mutation_result.mutants if not m.get("killed")]
+                for m in survived[:3]:
+                    survived_details.append(f"  - {m.get('description', m.get('mutant_id'))}")
+            surv_str = "\n".join(survived_details) if survived_details else "  - Unkilled logic mutations in modified lines"
+            return (
+                f"[VERIFICATION ADVISORY: HOLLOW TESTS DETECTED]\n"
+                f"{self.reason}\n"
+                f"The following implementation mutations SURVIVED because your test assertions did not catch them:\n"
+                f"{surv_str}\n"
+                f"DIRECTIVE: Your test suite is too permissive. Add strict assertions that fail when these implementation behaviors change."
+            )
+
+        return f"[VERIFICATION FAILED] {self.reason}"
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "allow": self.allow,
             "stage": self.stage,
             "reason": self.reason,
+            "feedback": self.format_agent_feedback(),
             "interrogation": self.interrogation_report.summary() if self.interrogation_report else None,
             "mutation_probe": self.mutation_result.summary if self.mutation_result else None,
         }

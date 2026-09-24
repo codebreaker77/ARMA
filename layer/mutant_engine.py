@@ -104,12 +104,72 @@ class AstMutator(ast.NodeTransformer):
 
         return self.generic_visit(node)
 
+    def visit_BinOp(self, node: ast.BinOp) -> ast.AST:
+        if self.mutated or node.lineno != self.target_line:
+            return self.generic_visit(node)
+
+        if self.mutation_type == "BIN_OP_SWAP":
+            if isinstance(node.op, ast.Add):
+                new_op = ast.Sub()
+            elif isinstance(node.op, ast.Sub):
+                new_op = ast.Add()
+            elif isinstance(node.op, ast.Mult):
+                new_op = ast.FloorDiv()
+            elif isinstance(node.op, (ast.Div, ast.FloorDiv)):
+                new_op = ast.Mult()
+            elif isinstance(node.op, ast.Mod):
+                new_op = ast.FloorDiv()
+            elif isinstance(node.op, ast.BitAnd):
+                new_op = ast.BitOr()
+            elif isinstance(node.op, ast.BitOr):
+                new_op = ast.BitAnd()
+            else:
+                new_op = ast.Sub()
+            new_node = ast.BinOp(left=node.left, op=new_op, right=node.right)
+            ast.copy_location(new_node, node)
+            self.mutated = True
+            return new_node
+
+        return self.generic_visit(node)
+
+    def visit_Raise(self, node: ast.Raise) -> ast.AST:
+        if self.mutated or node.lineno != self.target_line:
+            return self.generic_visit(node)
+
+        if self.mutation_type == "REMOVE_RAISE":
+            new_node = ast.Pass()
+            ast.copy_location(new_node, node)
+            self.mutated = True
+            return new_node
+
+        return self.generic_visit(node)
+
+    def visit_UnaryOp(self, node: ast.UnaryOp) -> ast.AST:
+        if self.mutated or node.lineno != self.target_line:
+            return self.generic_visit(node)
+
+        if self.mutation_type == "STRIP_NOT" and isinstance(node.op, ast.Not):
+            self.mutated = True
+            return node.operand
+
+        return self.generic_visit(node)
+
     def visit_Return(self, node: ast.Return) -> ast.AST:
         if self.mutated or node.lineno != self.target_line:
             return self.generic_visit(node)
 
         if self.mutation_type == "RETURN_NONE" and node.value is not None:
             new_node = ast.Return(value=ast.Constant(value=None))
+            ast.copy_location(new_node, node)
+            self.mutated = True
+            return new_node
+        elif self.mutation_type == "RETURN_EMPTY_DICT":
+            new_node = ast.Return(value=ast.Dict(keys=[], values=[]))
+            ast.copy_location(new_node, node)
+            self.mutated = True
+            return new_node
+        elif self.mutation_type == "RETURN_EMPTY_LIST":
+            new_node = ast.Return(value=ast.List(elts=[], ctx=ast.Load()))
             ast.copy_location(new_node, node)
             self.mutated = True
             return new_node
@@ -186,13 +246,24 @@ class MutantEngine:
                 candidate_opportunities.append((lineno, "INVERT_COMPARATOR"))
             elif isinstance(node, ast.If):
                 candidate_opportunities.append((lineno, "NEGATE_CONDITION"))
+            elif isinstance(node, ast.BinOp):
+                candidate_opportunities.append((lineno, "BIN_OP_SWAP"))
+            elif isinstance(node, ast.Raise):
+                candidate_opportunities.append((lineno, "REMOVE_RAISE"))
+            elif isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+                candidate_opportunities.append((lineno, "STRIP_NOT"))
             elif isinstance(node, ast.Constant):
                 if isinstance(node.value, bool):
                     candidate_opportunities.append((lineno, "SWAP_BOOLEAN"))
                 elif isinstance(node.value, (int, float)):
                     candidate_opportunities.append((lineno, "OFF_BY_ONE"))
             elif isinstance(node, ast.Return) and node.value is not None:
-                candidate_opportunities.append((lineno, "RETURN_NONE"))
+                if isinstance(node.value, ast.Dict):
+                    candidate_opportunities.append((lineno, "RETURN_EMPTY_DICT"))
+                elif isinstance(node.value, (ast.List, ast.Set)):
+                    candidate_opportunities.append((lineno, "RETURN_EMPTY_LIST"))
+                else:
+                    candidate_opportunities.append((lineno, "RETURN_NONE"))
 
         # Deduplicate candidates by (line, type)
         unique_opps = []

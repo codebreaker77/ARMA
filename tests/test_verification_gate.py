@@ -63,3 +63,36 @@ def test_mutation_probe_fails_when_tests_are_blind():
     assert outcome.stage == "mutation_probe"
     assert "Verification Inadequate" in outcome.reason
     assert outcome.mutation_result.kill_ratio == 0.0
+
+
+def test_format_agent_feedback():
+    gate = VerificationAdequacyGate(min_mutation_kill_ratio=0.50)
+
+    # 1. Tampering feedback
+    outcome_tamper = gate.verify(patch_text=WEAKENED_TEST_PATCH)
+    fb_tamper = outcome_tamper.format_agent_feedback()
+    assert "TEST TAMPERING DETECTED" in fb_tamper
+    assert "DIRECTIVE: You are strictly forbidden" in fb_tamper
+
+    # 2. Hollow test feedback
+    test_runner_blind = lambda mutant: False
+    outcome_hollow = gate.verify(
+        patch_text=CLEAN_PATCH,
+        source_files_content={"src/auth.py": SRC_CODE},
+        test_runner=test_runner_blind,
+    )
+    fb_hollow = outcome_hollow.format_agent_feedback()
+    assert "HOLLOW TESTS DETECTED" in fb_hollow
+    assert "The following implementation mutations SURVIVED" in fb_hollow
+    assert "DIRECTIVE: Your test suite is too permissive" in fb_hollow
+
+    # 3. Passed feedback
+    test_runner_sharp = lambda mutant: True
+    outcome_pass = gate.verify(
+        patch_text=CLEAN_PATCH,
+        source_files_content={"src/auth.py": SRC_CODE},
+        test_runner=test_runner_sharp,
+    )
+    fb_pass = outcome_pass.format_agent_feedback()
+    assert "VERIFICATION PASSED" in fb_pass
+

@@ -195,3 +195,74 @@ def test_main_cli_tampering_veto(capsys):
     finally:
         sys.stdin = old_stdin
 
+
+def test_javascript_typescript_tampering():
+    interrogator = TestDiffInterrogator()
+    js_diff = """diff --git a/src/__tests__/auth.test.ts b/src/__tests__/auth.test.ts
+--- a/src/__tests__/auth.test.ts
++++ b/src/__tests__/auth.test.ts
+@@ -10,6 +10,4 @@
+-it("should reject expired tokens", async () => {
+-    expect(verifyToken(expired)).toBe(false);
+-});
++it.skip("temporarily skip", async () => {
++    await doLogin().catch(() => {});
++});
+"""
+    report = interrogator.interrogate_diff(js_diff)
+    assert report.touches_test_files
+    assert report.has_structural_tampering
+    assert report.deleted_tests_count >= 1
+    assert report.injected_skips_count >= 1
+    assert report.swallowed_exceptions_count >= 1
+    v_types = [v.violation_type for v in report.violations]
+    assert "TEST_DELETED" in v_types
+    assert "SKIP_INJECTED" in v_types
+    assert "EXCEPTION_SWALLOWED" in v_types
+
+
+def test_go_tampering():
+    interrogator = TestDiffInterrogator()
+    go_diff = """diff --git a/pkg/service/user_test.go b/pkg/service/user_test.go
+--- a/pkg/service/user_test.go
++++ b/pkg/service/user_test.go
+@@ -20,5 +20,3 @@
+-func TestCriticalSecurityCheck(t *testing.T) {
+-    assert.NoError(t, RunCheck())
+-}
++func TestExisting(t *testing.T) {
++    t.Skip("skipping on Windows")
+ }
+"""
+    report = interrogator.interrogate_diff(go_diff)
+    assert report.touches_test_files
+    assert report.has_structural_tampering
+    assert report.deleted_tests_count >= 1
+    assert report.injected_skips_count >= 1
+    v_types = [v.violation_type for v in report.violations]
+    assert "TEST_DELETED" in v_types
+    assert "SKIP_INJECTED" in v_types
+
+
+def test_rust_tampering():
+    interrogator = TestDiffInterrogator()
+    rust_diff = """diff --git a/tests/integration_test.rs b/tests/integration_test.rs
+--- a/tests/integration_test.rs
++++ b/tests/integration_test.rs
+@@ -15,5 +15,3 @@
+-#[test]
+-fn test_memory_safety() {
+-    assert_eq!(alloc(), 0);
+-}
++#[ignore]
++#[test]
++fn test_other() {}
+"""
+    report = interrogator.interrogate_diff(rust_diff)
+    assert report.touches_test_files
+    assert report.has_structural_tampering
+    assert report.injected_skips_count >= 1
+    v_types = [v.violation_type for v in report.violations]
+    assert "SKIP_INJECTED" in v_types
+
+

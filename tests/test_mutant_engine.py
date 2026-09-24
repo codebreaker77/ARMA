@@ -44,3 +44,31 @@ def test_diff_line_extractor():
     assert "src/shop.py" in lines_map
     assert 2 in lines_map["src/shop.py"]
     assert 3 in lines_map["src/shop.py"]
+
+
+def test_semantic_mutation_operators():
+    code = """def process(x, flag):
+    if not flag:
+        raise ValueError("Invalid flag")
+    total = x + 10
+    return {"result": total}
+"""
+    engine = MutantEngine(max_mutants_budget=10)
+    mutants = engine.generate_mutants_for_source(code, "test.py")
+    m_types = [m.mutation_type for m in mutants]
+
+    # Verify semantic operators were detected and generated
+    assert "STRIP_NOT" in m_types
+    assert "REMOVE_RAISE" in m_types
+    assert "BIN_OP_SWAP" in m_types
+    assert "RETURN_EMPTY_DICT" in m_types
+
+    # Verify REMOVE_RAISE replaced raise with pass
+    raise_mutant = next(m for m in mutants if m.mutation_type == "REMOVE_RAISE")
+    assert "pass" in raise_mutant.mutated_code
+    assert "raise ValueError" not in raise_mutant.mutated_snippet or "pass" in raise_mutant.mutated_snippet
+
+    # Verify BIN_OP_SWAP replaced + with -
+    binop_mutant = next(m for m in mutants if m.mutation_type == "BIN_OP_SWAP")
+    assert "-" in binop_mutant.mutated_snippet
+

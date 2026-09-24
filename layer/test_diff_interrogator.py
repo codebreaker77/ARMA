@@ -17,9 +17,21 @@ from typing import List, Dict, Any, Optional, Set, Tuple
 
 
 TEST_FILE_PATTERN = re.compile(
-    r"(?:^|[/\\])(?:tests?|testing|test_[^/\\]+|[^/\\]+_test)\.[a-zA-Z0-9]+$",
+    r"(?:^|[/\\])(?:__tests__[/\\]|tests?[/\\]|testing[/\\]|test_[^/\\]+|[^/\\]+[\._](?:test|spec))\.[a-zA-Z0-9]+$",
     re.IGNORECASE
 )
+
+
+def detect_file_language(file_path: str) -> str:
+    """Detect language of a test file based on extension."""
+    ext = file_path.rsplit(".", 1)[-1].lower() if "." in file_path else ""
+    if ext in ("js", "jsx", "ts", "tsx", "mjs", "cjs"):
+        return "javascript"
+    elif ext == "go":
+        return "go"
+    elif ext == "rs":
+        return "rust"
+    return "python"
 
 
 @dataclass
@@ -116,6 +128,7 @@ class TestDiffInterrogator:
 
     def _analyze_test_file_block(self, file_path: str, block: str, report: InterrogationReport) -> None:
         lines = block.split("\n")
+        lang = detect_file_language(file_path)
         
         minus_lines: List[Tuple[int, str]] = []
         plus_lines: List[Tuple[int, str]] = []
@@ -137,16 +150,42 @@ class TestDiffInterrogator:
             else:
                 curr_line_no += 1
 
+        # Language-specific regex configurations
+        if lang == "javascript":
+            fn_def_re = re.compile(r"^\s*(?:async\s+)?(?:test|it|describe)\s*\(\s*[\"'\`]([^\"'\`]+)[\"'\`]")
+            skip_re = re.compile(r"\b(?:test|it|describe)\.skip\s*\(|\b(?:xit|xtest|xdescribe)\s*\(")
+            swallow_re = re.compile(r"\bcatch\s*(?:\([^)]*\))?\s*\{\s*\}|\.catch\s*\(\s*(?:\(\s*\)\s*=>|\w+\s*=>)?\s*\{?\s*\}?\s*\)")
+            assert_re = re.compile(r"\b(?:expect\s*\(|assert\s*\(|assert\.[A-Za-z_]+\()")
+            loosening_fn = lambda d, p: ("toEqual" in d or "toBe(" in d) and ("toBeDefined" in p or "toBeTruthy" in p)
+        elif lang == "go":
+            fn_def_re = re.compile(r"^\s*func\s+(Test\w+)\s*\(")
+            skip_re = re.compile(r"\bt\.(?:Skip|Skipf|SkipNow)\(")
+            swallow_re = re.compile(r"if\s+err\s*!=\s*nil\s*\{\s*(?://[^\n]*)?\}")
+            assert_re = re.compile(r"\b(?:assert\.[A-Za-z_]+\(|require\.[A-Za-z_]+\(|t\.(?:Error|Errorf|Fail|Fatal|Fatalf)\()")
+            loosening_fn = lambda d, p: ("Equal(" in d or "True(" in d) and ("NotNil(" in p)
+        elif lang == "rust":
+            fn_def_re = re.compile(r"^\s*(?:#\[test\]|fn\s+(test_\w+)\s*\()")
+            skip_re = re.compile(r"^\s*#\[ignore(?:\]|\()")
+            swallow_re = re.compile(r"let\s+_\s*=\s*(?:std::panic::)?catch_unwind")
+            assert_re = re.compile(r"\b(?:assert!|assert_eq!|assert_ne!)\s*\(")
+            loosening_fn = lambda d, p: ("assert_eq!" in d) and ("assert!" in p and "is_ok()" in p)
+        else: # Default: Python
+            fn_def_re = re.compile(r"^\s*def\s+(test_\w+)")
+            skip_re = re.compile(r"^\s*@?pytest\.mark\.(?:skip|xfail)|^\s*@?unittest\.skip|\bpytest\.skip\(")
+            swallow_re = re.compile(r"^\s*except\s*(?:\([^\)]*AssertionError[^\)]*\)|AssertionError|Exception)")
+            assert_re = re.compile(r"^\s*(?:assert\b|self\.assert[A-Za-z_]+\()")
+            loosening_fn = lambda d, p: ("==" in d or "assertEqual" in d) and (" in " in p or "isinstance" in p)
+
         # 1. Track new tests added vs deleted tests
         for line_no, content in plus_lines:
-            if re.search(r"^\s*def\s+test_", content):
+            if fn_def_re.search(content):
                 report.new_tests_count += 1
                 
         for line_no, content in minus_lines:
-            if re.search(r"^\s*def\s+test_", content):
+            m = fn_def_re.search(content)
+            if m:
+                fn_name = m.group(1) if m.lastindex else "test"
                 # Check if it was merely renamed or moved in plus_lines
-                name_match = re.search(r"def\s+(test_\w+)", content)
-                fn_name = name_match.group(1) if name_match else ""
                 if fn_name and not any(fn_name in p[1] for p in plus_lines):
                     report.deleted_tests_count += 1
                     report.violations.append(TestViolation(
@@ -154,40 +193,32 @@ class TestDiffInterrogator:
                         file_path=file_path,
                         line_number=line_no,
                         snippet=content.strip(),
-                        explanation=f"Pre-existing test function '{fn_name}' was deleted."
+                        explanation=f"Pre-existing test '{fn_name}' was deleted in {lang} test suite."
                     ))
 
-        # 2. Check for injected skips and xfails
+        # 2. Check for injected skips
         for line_no, content in plus_lines:
-            if re.search(r"^\s*@?pytest\.mark\.(?:skip|xfail)", content) or re.search(r"^\s*@?unittest\.skip", content):
+            if skip_re.search(content):
                 report.injected_skips_count += 1
                 report.violations.append(TestViolation(
                     violation_type="SKIP_INJECTED",
                     file_path=file_path,
                     line_number=line_no,
                     snippet=content.strip(),
-                    explanation="Injected @pytest.mark.skip or @unittest.skip decorator into test suite."
-                ))
-            elif re.search(r"\bpytest\.skip\(", content):
-                report.injected_skips_count += 1
-                report.violations.append(TestViolation(
-                    violation_type="SKIP_INJECTED",
-                    file_path=file_path,
-                    line_number=line_no,
-                    snippet=content.strip(),
-                    explanation="Injected pytest.skip() call inside test execution."
+                    explanation=f"Injected skip directive in {lang} test suite."
                 ))
 
         # 3. Check for exception swallowing inside tests
         for i, (line_no, content) in enumerate(plus_lines):
-            if re.search(r"^\s*except\s*(?:\([^\)]*AssertionError[^\)]*\)|AssertionError|Exception)", content):
-                # Check if pass is on same line or within next 2 lines
-                is_swallowed = "pass" in content or "..." in content
-                if not is_swallowed:
-                    for j in range(i + 1, min(i + 3, len(plus_lines))):
-                        if re.search(r"^\s*(?:pass|\.\.\.)\s*$", plus_lines[j][1]):
-                            is_swallowed = True
-                            break
+            if swallow_re.search(content):
+                is_swallowed = True
+                if lang == "python":
+                    is_swallowed = "pass" in content or "..." in content
+                    if not is_swallowed:
+                        for j in range(i + 1, min(i + 3, len(plus_lines))):
+                            if re.search(r"^\s*(?:pass|\.\.\.)\s*$", plus_lines[j][1]):
+                                is_swallowed = True
+                                break
                 if is_swallowed:
                     report.swallowed_exceptions_count += 1
                     report.violations.append(TestViolation(
@@ -195,19 +226,17 @@ class TestDiffInterrogator:
                         file_path=file_path,
                         line_number=line_no,
                         snippet=content.strip(),
-                        explanation="Swallowed AssertionError or Exception in test body to mask test failure."
+                        explanation=f"Swallowed test assertion/exception in {lang} test body."
                     ))
 
-        # 4. Check for deleted assertions
+        # 4. Check for deleted / modified assertions
         deleted_asserts = []
         for line_no, content in minus_lines:
             stripped = content.strip()
-            if re.search(r"^\s*(?:assert\b|self\.assert[A-Za-z_]+\()", stripped):
+            if assert_re.search(stripped):
                 deleted_asserts.append((line_no, stripped))
 
         for line_no, del_stmt in deleted_asserts:
-            # Check if this assertion was replaced by a comparable assertion in plus_lines
-            # or if it was loosened/removed
             is_replaced = False
             is_loosened = False
             is_modified = False
@@ -215,10 +244,8 @@ class TestDiffInterrogator:
 
             for p_line_no, p_content in plus_lines:
                 p_stripped = p_content.strip()
-                if re.search(r"^\s*(?:assert\b|self\.assert[A-Za-z_]+\()", p_stripped):
-                    # Check for loosening patterns:
-                    # e.g., == replaced by in, or replaced by assertTrue(True), etc.
-                    if ("==" in del_stmt or "assertEqual" in del_stmt) and (" in " in p_stripped or "isinstance" in p_stripped):
+                if assert_re.search(p_stripped):
+                    if loosening_fn(del_stmt, p_stripped):
                         is_loosened = True
                         replacement_snippet = p_stripped
                         break
@@ -236,7 +263,7 @@ class TestDiffInterrogator:
                     file_path=file_path,
                     line_number=line_no,
                     snippet=f"- {del_stmt}  -->  + {replacement_snippet}",
-                    explanation="Strict equality assertion was replaced with weaker containment or type check."
+                    explanation="Strict assertion was replaced with weaker validation check."
                 ))
             elif is_modified:
                 report.modified_assertions_count += 1
@@ -254,7 +281,7 @@ class TestDiffInterrogator:
                     file_path=file_path,
                     line_number=line_no,
                     snippet=del_stmt,
-                    explanation="Pre-existing assertion was removed from test file without replacement."
+                    explanation=f"Pre-existing assertion was removed from {lang} test file without replacement."
                 ))
 
 
