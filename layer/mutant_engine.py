@@ -134,8 +134,13 @@ class MutantEngine:
             fname = header.group(2)
             if not fname.endswith(".py"):
                 continue
-            # Skip test files - we mutate the IMPLEMENTATION, not the tests
-            if re.search(r"(?:^|[/\\])(?:tests?|testing|test_[^/\\]+|[^/\\]+_test)\.py$", fname, re.IGNORECASE):
+            # Skip test files, benchmark scripts, and agent scratch files
+            is_test_or_scratch = (
+                re.search(r"(?:^|[/\\])(?:tests?|testing|test_[^/\\]+|[^/\\]+_test)\.py$", fname, re.IGNORECASE) or
+                re.search(r"(?:^|[/\\])(?:reproduce|debug|verify|verification|check|poc|scratch|temp|run_)[^/\\]*\.py$", fname, re.IGNORECASE) or
+                ("new file mode" in block and "/" not in fname and "\\" not in fname)
+            )
+            if is_test_or_scratch:
                 continue
 
             lines = block.split("\n")

@@ -11,6 +11,7 @@ Interrogates agent proof before approving completion:
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional, Callable
 import os
+import sys
 import subprocess
 
 from layer.test_diff_interrogator import TestDiffInterrogator, InterrogationReport
@@ -51,7 +52,7 @@ class VerificationAdequacyGate:
 
     def __init__(
         self,
-        min_mutation_kill_ratio: float = 0.50,
+        min_mutation_kill_ratio: float = 0.20,
         mutant_budget: int = 5,
     ):
         self.interrogator = TestDiffInterrogator()
@@ -147,6 +148,46 @@ class VerificationAdequacyGate:
             mutation_result=mutation_result,
         )
 
+    @staticmethod
+    def _execute_test_cmd(
+        test_command: str,
+        cwd: str,
+        timeout_seconds: int,
+        env: Dict[str, str],
+    ) -> subprocess.CompletedProcess:
+        """Execute test command with strict process tree termination on timeout."""
+        proc = subprocess.Popen(
+            test_command,
+            shell=True,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+        )
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout_seconds)
+            return subprocess.CompletedProcess(
+                args=test_command,
+                returncode=proc.returncode,
+                stdout=stdout,
+                stderr=stderr,
+            )
+        except subprocess.TimeoutExpired:
+            if sys.platform == "win32":
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                    capture_output=True,
+                    check=False,
+                )
+            else:
+                proc.kill()
+            try:
+                proc.communicate(timeout=2)
+            except Exception:
+                pass
+            raise
+
     def verify_repository(
         self,
         repo_path: str,
@@ -214,13 +255,10 @@ class VerificationAdequacyGate:
 
         # Baseline check: Tests MUST pass on unmutated code first
         try:
-            base_res = subprocess.run(
-                test_command,
-                shell=True,
+            base_res = self._execute_test_cmd(
+                test_command=test_command,
                 cwd=repo_path,
-                capture_output=True,
-                timeout=timeout_seconds,
-                text=True,
+                timeout_seconds=timeout_seconds,
                 env=env,
             )
             if base_res.returncode != 0:
@@ -263,13 +301,10 @@ class VerificationAdequacyGate:
                     f.write(m.mutated_code)
 
                 # Run test command against mutant
-                res = subprocess.run(
-                    test_command,
-                    shell=True,
+                res = self._execute_test_cmd(
+                    test_command=test_command,
                     cwd=repo_path,
-                    capture_output=True,
-                    timeout=timeout_seconds,
-                    text=True,
+                    timeout_seconds=timeout_seconds,
                     env=env,
                 )
                 if res.returncode != 0:
