@@ -52,9 +52,11 @@ class CodeGraph:
         # Target extensions for code analysis
         supported_exts = {".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".rs"}
 
+        ignored_dirs = {"node_modules", "venv", "env", "__pycache__", "dist", "build", "repos_cache", ".agents", ".gemini", ".git"}
         for root, dirs, files in os.walk(self.root_dir):
             # Skip hidden and cache directories
-            dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("node_modules", "venv", "__pycache__", "dist", "build")]
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ignored_dirs]
+
 
             for f in files:
                 ext = os.path.splitext(f)[1].lower()

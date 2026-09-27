@@ -44,7 +44,9 @@ Issues = "https://github.com/codebreaker77/ARMA/issues"
 
 [project.scripts]
 arma-veto = "arma_veto.interrogator:main_cli"
+arma = "layer.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["arma_veto*"]
-exclude = ["experiments*", "tests*", "data*", "layer*", "docs*"]
+include = ["arma_veto*", "arma*", "layer*"]
+exclude = ["experiments*", "tests*", "data*", "docs*"]
+

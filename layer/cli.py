@@ -347,9 +347,83 @@ def cmd_verify(args):
         sys.exit(1)
 
 
+def cmd_watch(args):
+    """Launch real-time repository watcher monitoring for test-tampering."""
+    from arma.watcher import RepoWatcher
+    watcher = RepoWatcher(repo_path=args.repo, strict=args.strict)
+    watcher.run(interval_seconds=args.interval, once=args.once)
+
+
+def cmd_veto(args):
+    """Run deterministic test-diff interrogator."""
+    from arma_veto.interrogator import main_cli
+    argv = []
+    if args.git:
+        argv.append("--git")
+    if args.strict:
+        argv.append("--strict")
+    if args.patch_file:
+        argv.append(args.patch_file)
+    sys.exit(main_cli(argv))
+
+
+def cmd_impact(args):
+    """Compute transitive dependency blast radius using Fullerenes CodeGraph."""
+    import os
+    from layer.code_graph import CodeGraph
+    graph = CodeGraph(root_dir=args.repo or os.getcwd())
+    impact = graph.predict_impact(args.target_file, symbol=args.symbol)
+
+    print("=" * 65)
+    print("ARMA Blast Radius & Dependency Impact Closure")
+    print("=" * 65)
+    print(f"Target File     : {args.target_file}")
+    if args.symbol:
+        print(f"Target Symbol   : {args.symbol}")
+    print(f"Impacted Files  : {len(impact)}")
+    print("-" * 65)
+
+    test_files = [f for f in impact if "test" in f.lower()]
+    impl_files = [f for f in impact if "test" not in f.lower()]
+
+    print(f"Implementation Modules ({len(impl_files)}):")
+    for f in sorted(impl_files)[:15]:
+        print(f"  - {f}")
+    if len(impl_files) > 15:
+        print(f"  ... and {len(impl_files) - 15} more")
+
+    print(f"\nAffected Test Suites ({len(test_files)}):")
+    for f in sorted(test_files):
+        print(f"  - {f}")
+    print("=" * 65)
+
+
 def main():
-    parser = argparse.ArgumentParser(prog="arma", description="ARMA Layer CLI")
+    parser = argparse.ArgumentParser(prog="arma", description="ARMA Autonomous Reliability Architecture CLI")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # watch
+    p_watch = subparsers.add_parser("watch", help="Monitor repository in real-time and alert on test tampering")
+    p_watch.add_argument("--repo", default=".", help="Repository root path")
+    p_watch.add_argument("--interval", type=float, default=1.0, help="Polling interval in seconds (default: 1.0)")
+    p_watch.add_argument("--strict", action="store_true", help="Veto on both structural deletions and assertion modifications")
+    p_watch.add_argument("--once", action="store_true", help="Perform single check and exit")
+    p_watch.set_defaults(func=cmd_watch)
+
+    # veto
+    p_veto = subparsers.add_parser("veto", help="Deterministic polyglot test-diff interrogator")
+    p_veto.add_argument("patch_file", nargs="?", default=None, help="Path to patch or diff file")
+    p_veto.add_argument("--git", action="store_true", help="Interrogate uncommitted git diff")
+    p_veto.add_argument("--strict", action="store_true", help="Veto on both structural deletions and assertion modifications")
+    p_veto.set_defaults(func=cmd_veto)
+
+    # impact
+    p_impact = subparsers.add_parser("impact", help="Calculate Fullerenes blast radius for a file edit")
+    p_impact.add_argument("target_file", help="Path of file being edited")
+    p_impact.add_argument("-s", "--symbol", type=str, default=None, help="Specific symbol being changed")
+    p_impact.add_argument("-r", "--repo", type=str, default=None, help="Repository root path")
+    p_impact.set_defaults(func=cmd_impact)
+
 
     # status
     p_status = subparsers.add_parser("status", help="Show system status and recorded totals")
